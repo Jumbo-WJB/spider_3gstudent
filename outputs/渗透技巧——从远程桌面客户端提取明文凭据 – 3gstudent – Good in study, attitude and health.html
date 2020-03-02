@@ -1,0 +1,290 @@
+<article class="post">
+  <h1>渗透技巧——从远程桌面客户端提取明文凭据</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E8%8E%B7%E5%BE%97Windows%E7%B3%BB%E7%BB%9F%E7%9A%84%E8%BF%9C%E7%A8%8B%E6%A1%8C%E9%9D%A2%E8%BF%9E%E6%8E%A5%E5%8E%86%E5%8F%B2%E8%AE%B0%E5%BD%95/">《渗透技巧——获得Windows系统的远程桌面连接历史记录》</a>曾介绍了获得远程桌面连接历史记录的方法。</p>
+
+<p>在实际的渗透过程中，如果发现了远程桌面连接的历史记录，那么下一步就需要想办法获取远程桌面连接使用的口令。</p>
+
+<p>本文将会结合RdpThief介绍从远程桌面客户端提取明文凭据的方法，分享需要注意的细节。</p>
+
+<p>RdpThief地址：</p>
+
+<p>https://github.com/0x09AL/RdpThief</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>获取远程桌面连接口令的思路</li>
+  <li>使用Detours库hook系统API的方法</li>
+  <li>使用API monitor监控系统API调用的方法</li>
+  <li>使用RdpThief从远程桌面客户端提取明文凭据</li>
+</ul>
+
+<h2 id="0x02-获取远程桌面连接口令的思路">0x02 获取远程桌面连接口令的思路</h2>
+<hr>
+
+<p>通常有以下两种：</p>
+
+<p>1.使用键盘记录程序，记录mstsc.exe在启动过程中用户输入的口令</p>
+
+<p>2.在mstsc.exe启动时，读取mstsc.exe的内存数据，提取出用户输入的口令</p>
+
+<p>RdpThief是第二种实现思路，使用Detours库hook系统API，使用API monitor监控系统的API调用，找到mstsc.exe在内存中存储明文口令的位置，代码简洁有效。</p>
+
+<h2 id="0x03-使用detours库hook系统api的方法">0x03 使用Detours库hook系统API的方法</h2>
+<hr>
+
+<p>RdpThief在实现上使用Detours库来hook系统API，所以这里简要介绍一下Detours库的用法</p>
+
+<p>Detours库用于监视和检测Windows上的API调用，可以用来hook系统API</p>
+
+<p>这里介绍使用Detours库hook系统API的两种方法</p>
+
+<h3 id="1编译detours源码并使用">1.编译Detours源码并使用</h3>
+
+<h4 id="1编译detours源码">(1)编译Detours源码</h4>
+
+<p>下载Detours源码，地址如下：</p>
+
+<p>https://github.com/Microsoft/Detours</p>
+
+<p>使用Visual Studio编译Detours源码(这里以VS2015为例)，需要区分32位和64位</p>
+
+<p>64位编译：</p>
+
+<p>打开<code class="language-plaintext highlighter-rouge">VS2015 x64 本机工具命令提示符</code></p>
+
+<p>执行以下命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd Detours-master\src
+nmake
+</code></pre></div></div>
+
+<p>命令执行后将在文件夹Detours-master下生成以下三个文件夹，包括Detours的头文件和库文件</p>
+
+<ul>
+  <li>bin.X64</li>
+  <li>include</li>
+  <li>lib.X64</li>
+</ul>
+
+<p>32位编译：</p>
+
+<p>打开<code class="language-plaintext highlighter-rouge">VS2015本机工具命令提示符</code></p>
+
+<p>执行以下命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd Detours-master\src
+nmake
+</code></pre></div></div>
+
+<p>命令执行后将在文件夹Detours-master下生成以下三个文件夹，包括Detours的头文件和库文件</p>
+
+<ul>
+  <li>bin.X86</li>
+  <li>include</li>
+  <li>lib.X86</li>
+</ul>
+
+<h4 id="2导入detours">(2)导入Detours</h4>
+
+<p>在新建的C++工程中添加对应版本的头文件：</p>
+
+<ul>
+  <li>detours.h</li>
+  <li>detours.lib</li>
+</ul>
+
+<p>代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include "detours.h"
+#pragma comment (lib,"detours.lib")
+</code></pre></div></div>
+
+<h3 id="2通过install-package自动安装">2.通过Install-Package自动安装</h3>
+
+<h4 id="1安装">(1)安装</h4>
+
+<p>在Visual Studio中选择<code class="language-plaintext highlighter-rouge">工具</code>-<code class="language-plaintext highlighter-rouge">&gt;NuGet包管理器</code>-&gt;<code class="language-plaintext highlighter-rouge">程序包管理器控制台</code></p>
+
+<p>输入安装命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Install-Package Detours
+</code></pre></div></div>
+
+<p>将会自动安装Detours库，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-11-18/1-1.png" alt="Alt text"></p>
+
+<h4 id="2导入detours-1">(2)导入Detours</h4>
+
+<p>代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;detours.h&gt;
+#pragma comment (lib,"detours.lib")
+</code></pre></div></div>
+
+<p>使用Detours库hook系统API时常用的几个函数：</p>
+
+<ul>
+  <li>DetourTransactionBegin();</li>
+  <li>DetourUpdateThread(GetCurrentThread());</li>
+  <li>DetourAttach();</li>
+  <li>DetourDetach();</li>
+  <li>DetourTransactionCommit()</li>
+</ul>
+
+<p>Hook系统API Messagebox()的实例代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;Windows.h&gt;
+#include &lt;detours.h&gt;
+#pragma comment (lib,"detours.lib")
+static int(WINAPI *TrueMessageBox)(HWND, LPCTSTR, LPCTSTR, UINT) = MessageBox;
+int WINAPI OurMessageBox(HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, UINT uType) {
+	return TrueMessageBox(NULL, L"Hooked", lpCaption, 0);
+}
+int main()
+{
+	DetourTransactionBegin();
+	DetourUpdateThread(GetCurrentThread());
+	DetourAttach(&amp;(PVOID&amp;)TrueMessageBox, OurMessageBox);
+	DetourTransactionCommit();
+	MessageBox(NULL, L"Hello", L"Hello", 0);
+	DetourTransactionBegin();
+	DetourUpdateThread(GetCurrentThread());
+	DetourDetach(&amp;(PVOID&amp;)TrueMessageBox, OurMessageBox); 
+	DetourTransactionCommit();
+}
+</code></pre></div></div>
+
+<h2 id="0x04-使用api-monitor监控系统api调用的方法">0x04 使用API monitor监控系统API调用的方法</h2>
+<hr>
+
+<p>RdpThief使用API monitor监控系统的API调用，找到mstsc.exe在内存中存储明文口令的位置，这里简要介绍一下API monitor的用法</p>
+
+<p>API monitor的下载地址：</p>
+
+<p>http://www.rohitab.com/downloads</p>
+
+<p>运行后需要选择进行监控的模块，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-11-18/1-2.png" alt="Alt text"></p>
+
+<p>接着选择需要监控的进程，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-11-18/1-3.png" alt="Alt text"></p>
+
+<p>API monitor将会监控进程运行时调用的API，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-11-18/1-4.png" alt="Alt text"></p>
+
+<h2 id="0x05-rdpthief测试">0x05 RdpThief测试</h2>
+<hr>
+
+<p>介绍RdpThief细节的文章：</p>
+
+<p>https://www.mdsec.co.uk/2019/11/rdpthief-extracting-clear-text-credentials-from-remote-desktop-clients/</p>
+
+<p>RdpThief的代码里包括三部分内容：</p>
+
+<h4 id="1c工程编译生成dll">1.C++工程，编译生成dll</h4>
+
+<p>编译生成的dll，需要注入到mstsc.exe进程中</p>
+
+<p>这里可以使用我之前写的dll注入的代码，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/NtCreateThreadEx%20%2B%20LdrLoadDll.cpp</p>
+
+<p>但是需要把<code class="language-plaintext highlighter-rouge">FreeDll()</code>的功能去掉，dll需要一直在进程mstsc.exe的内存中，用来记录用户输入的口令</p>
+
+<h4 id="2rdpthief_x64tmp">2.RdpThief_x64.tmp</h4>
+
+<p>shellcode格式的dll，作者使用<a href="https://github.com/monoxgas/sRDI">sRDI</a>将编译好的dll转换为shellcode格式，便于cna脚本的调用</p>
+
+<h4 id="3rdpthiefcna">3.RdpThief.cna</h4>
+
+<p>Colbalt Strike使用的cna脚本，用于注入shellcode格式的dll</p>
+
+<p>支持三个命令：</p>
+
+<ul>
+  <li>rdpthief_enable，每5秒搜索mstsc.exe并将dll注入</li>
+  <li>rdpthief_disable，停止rdpthief_enable，但不会卸载注入的dll</li>
+  <li>rdpthief_dump，显示抓取的凭据，默认读取路径为<code class="language-plaintext highlighter-rouge">%temp%\data.bin</code></li>
+</ul>
+
+<h3 id="实际测试">实际测试</h3>
+
+<h4 id="预期功能">预期功能：</h4>
+
+<p>在mstsc.exe中输入用户名口令后，无论是否正确，都会被记录在文件<code class="language-plaintext highlighter-rouge">%temp%\data.bin</code>中</p>
+
+<p>1.在Win10下没有问题</p>
+
+<p>2.在Win7下能够获得输入的用户名和口令，但无法获得Server名称</p>
+
+<h4 id="查找问题原因">查找问题原因：</h4>
+
+<p>RdpThief在实现上通过捕获API SspiPrepareForCredRead()获得Server名称</p>
+
+<p>在Win7系统下，我使用API monitor监控系统调用的API，发现不存在这个API，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-11-18/2-1.png" alt="Alt text"></p>
+
+<p>找到问题的原因</p>
+
+<h4 id="解决方法1">解决方法1：</h4>
+
+<p>通过搜索，发现API CredReadW() 能够记录Server名称，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-11-18/2-2.png" alt="Alt text"></p>
+
+<p>所以可以尝试hook API CredReadW ，示例代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>static BOOL(WINAPI *OriginalCredReadW)(LPCWSTR TargetName, DWORD Type, DWORD Flags, PCREDENTIALW *Credential) = CredReadW;
+BOOL HookedCredReadW(LPCWSTR TargetName, DWORD Type, DWORD Flags, PCREDENTIALW *Credential)
+{
+	lpServer = TargetName;
+	return OriginalCredReadW(TargetName, Type, Flags, Credential);
+}
+</code></pre></div></div>
+
+<p>添加Attach和Detach代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>DetourAttach(&amp;(PVOID&amp;)OriginalCredReadW, HookedCredReadW);
+DetourDetach(&amp;(PVOID&amp;)OriginalCredReadW, HookedCredReadW);
+</code></pre></div></div>
+
+<h4 id="解决方法2">解决方法2：</h4>
+
+<p>远程桌面建立连接后会在注册表保存远程桌面连接的记录，这里可以通过读取远程桌面连接的历史记录获得Server名称</p>
+
+<p>使用的脚本地址：</p>
+
+<p>https://github.com/3gstudent/List-RDP-Connections-History/blob/master/ListLogged-inUsers.ps1</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了使用Detours库hook系统API和使用API monitor监控系统API调用的方法，测试RdpThief，分享在Win7下使用时获得Server名称的方法，实现了从远程桌面客户端提取明文凭据。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on November 18, 2019
+  </div>
+
+  
+</article>

@@ -1,0 +1,195 @@
+<article class="post">
+  <h1>Use xwizard.exe to load dll</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的<a href="https://3gstudent.github.io/3gstudent.github.io/Use-Excel.Application-object's-RegisterXLL()-method-to-load-dll/">文章</a>介绍了利用Excel.Application object’s RegisterXLL()加载dll的技巧。本文继续，介绍最近学习到的一种更为通用的方法——利用xwizard.exe加载dll。
+该方法最大的特点是xwizard.exe自带微软签名，在某种程度上说，能够绕过应用程序白名单的拦截。</p>
+
+<p>参考链接：</p>
+
+<p>http://www.hexacorn.com/blog/2017/07/31/the-wizard-of-x-oppa-plugx-style/</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>xwizard.exe简介</li>
+  <li>利用思路</li>
+  <li>实际测试</li>
+</ul>
+
+<h2 id="0x02-xwizardexe简介">0x02 xwizard.exe简介</h2>
+<hr>
+
+<p>应该为Extensible wizard的缩写，中文翻译可扩展的向导主机进程，暂时无法获得官方资料</p>
+
+<ul>
+  <li>支持Win7及以上操作系统</li>
+  <li>位于%windir%\system32\下</li>
+</ul>
+
+<p>双击运行，弹出操作说明，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/2-1.png" alt="Alt text"></p>
+
+<p>支持参数如下：</p>
+
+<ul>
+  <li>xwizard processXMLFile</li>
+  <li>xwizard RunWizard</li>
+  <li>xwizard RunPropertySheet</li>
+</ul>
+
+<p><strong>示例：</strong></p>
+
+<ul>
+  <li>
+    <p>xwizard processXMLFile 1.txt</p>
+  </li>
+  <li>
+    <p>xwizard RunWizard /u {11111111-1111-1111-1111-111111111111}</p>
+  </li>
+  <li>
+    <p>xwizard RunPropertySheet /u {11111111-1111-1111-1111-111111111111}</p>
+  </li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>参数中的GUID长度固定，否则弹框报错，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/2-2.png" alt="Alt text"></p>
+
+<h2 id="0x03-利用思路">0x03 利用思路</h2>
+<hr>
+
+<p>本节对Adam@Hexacorn的思路进行验证，文章地址：</p>
+
+<p>http://www.hexacorn.com/blog/2017/07/31/the-wizard-of-x-oppa-plugx-style/</p>
+
+<p>xwizard.exe的同级目录存在一个特别的文件xwizards.dll</p>
+
+<p>使用IDA查看xwizards.dll的导出函数，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/3-1.png" alt="Alt text"></p>
+
+<p>我们可以看到，xwizards.dll的导出函数名称同xwizard.exe支持的参数名称十分接近</p>
+
+<p>猜测xwizard.exe的功能是通过调用xwizards.dll实现的</p>
+
+<p>使用IDA逆向xwizard.exe来验证我们的判断，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/3-2.png" alt="Alt text"></p>
+
+<p>对于函数LoadLibraryEx，由于未指定dll的绝对路径，使用相对路径，所以搜索顺序为：</p>
+
+<ol>
+  <li>进程当前目录</li>
+  <li>通过SetDllDirectory所设置的路径</li>
+  <li>Windows系统目录+PATH，即c:\windows\system32</li>
+  <li>16位系统目录，即c:\windows\system</li>
+  <li>Windows目录，即c:\windows</li>
+  <li>PATH环境变量中所列目录</li>
+</ol>
+
+<p>也就是说，如果将xwizard.exe复制到另一任意目录，在该同级目录再保存一个自己编写的xwizards.dll，那么执行xwizard.exe时会优先调用同级目录的xwizards.dll，不再加载%windir%\system32\下的xwizards.dll</p>
+
+<p>这就实现了利用xwizard.exe加载我们自己编写的dll</p>
+
+<h2 id="0x04-实际测试">0x04 实际测试</h2>
+<hr>
+
+<p>测试系统： Win7 x86</p>
+
+<h3 id="1复制xwizardexe至新目录cx">1、复制xwizard.exe至新目录C:\x</h3>
+
+<h3 id="2编写dll">2、编写dll</h3>
+
+<p>使用vc 6.0，新建dll工程，在<code class="language-plaintext highlighter-rouge">case DLL_PROCESS_ATTACH</code>下添加弹框代码</p>
+
+<p>过程及优化方法不再赘述，可参考文章<a href="https://3gstudent.github.io/3gstudent.github.io/Use-Office-to-maintain-persistence/">《Use Office to maintain persistence》</a></p>
+
+<p>编译好的dll下载地址如下:</p>
+
+<p>https://github.com/3gstudent/test/blob/master/msg.dll</p>
+
+<p>该dll成功加载后会弹框</p>
+
+<h3 id="3测试">3、测试</h3>
+
+<p>直接执行xwizard.exe，没有弹出帮助对话框</p>
+
+<p>使用Process Monitor监控系统，检查xwizard.exe是否正常执行</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/4-1.png" alt="Alt text"></p>
+
+<p>xwizard.exe正常执行，但是没有尝试加载xwizards.dll</p>
+
+<p>再次测试，通过命令行执行，参数如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">xwizard processXMLFile 1.txt</code></p>
+
+<p>查看Process Monitor输出结果</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/4-2.png" alt="Alt text"></p>
+
+<p>xwizard.exe首先尝试加载<code class="language-plaintext highlighter-rouge">C:\x\xwizards.dll</code>,加载失败后再尝试加载<code class="language-plaintext highlighter-rouge">C:\windows\system32\xwizards.dll</code>（再次印证了对dll加载顺序的判断）</p>
+
+<p>接下来，将msg.dll重命名为xwizards.dll，保存在<code class="language-plaintext highlighter-rouge">C:\x</code></p>
+
+<p>命令行执行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">xwizard processXMLFile 1.txt</code></p>
+
+<p>成功加载C:\x\xwizards.dll，弹出对话框</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/4-3.png" alt="Alt text"></p>
+
+<p>测试成功</p>
+
+<h2 id="0x05-补充">0x05 补充</h2>
+<hr>
+
+<p>64位系统：</p>
+
+<p><code class="language-plaintext highlighter-rouge">%windir%\system32\</code>对应64位xwizard.exe，只能加载64位xwizards.dll</p>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/5-1.png" alt="Alt text"></p>
+
+<p><code class="language-plaintext highlighter-rouge">%windir%\SysWOW64\</code>对应32位xwizard.exe，只能加载32位xwizards.dll</p>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-8-3/5-2.png" alt="Alt text"></p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了利用xwizard.exe加载dll的技巧，特别的地方在于xwizard.exe包含微软签名，因此在某种程度上说，能够绕过应用程序白名单的拦截。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on August  3, 2017
+  </div>
+
+  
+</article>

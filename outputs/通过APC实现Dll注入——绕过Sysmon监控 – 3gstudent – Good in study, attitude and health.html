@@ -1,0 +1,321 @@
+<article class="post">
+  <h1>通过APC实现Dll注入——绕过Sysmon监控</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>要对指定进程进行远程注入，通常使用Windows提供的API CreateRemoteThread创建一个远程线程，进而注入dll或是执行shellcode</p>
+
+<p>Sysmon可用来监控和记录系统活动，可记录CreateRemoteThread操作</p>
+
+<p>注入的方法不只有CreateRemoteThread，能否通过其他注入方式绕过Sysmon的监控呢？</p>
+
+<p>Casey Smith@subTee在他的文章中给出了答案：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Shellcode Injection via QueueUserAPC - Hiding From Sysmon</code></p>
+
+<p><strong>地址如下：</strong></p>
+
+<p>http://subt0x10.blogspot.com/2017/01/shellcode-injection-via-queueuserapc.html</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍如下内容：</p>
+
+<ul>
+  <li>Sysmon配置测试，监控CreateRemoteThread操作</li>
+  <li>c++实现通过APC对Dll注入</li>
+  <li>绕过Sysmon测试</li>
+  <li>Casey Smith@subTee分享的C#实现代码和用途</li>
+</ul>
+
+<h3 id="sysmon">Sysmon：</h3>
+
+<p>可用来监控和记录系统活动，并记录到windows事件日志，包含如下事件：</p>
+
+<ul>
+  <li>Event ID 1: Process creation</li>
+  <li>Event ID 2: A process changed a file creation time</li>
+  <li>Event ID 3: Network connection</li>
+  <li>Event ID 4: Sysmon service state changed</li>
+  <li>Event ID 5: Process terminated</li>
+  <li>Event ID 6: Driver loaded</li>
+  <li>Event ID 7: Image loaded</li>
+  <li>Event ID 8: CreateRemoteThread</li>
+  <li>Event ID 9: RawAccessRead</li>
+  <li>Event ID 10: ProcessAccess</li>
+  <li>Event ID 11: FileCreate</li>
+  <li>Event ID 12: RegistryEvent (Object create and delete)</li>
+  <li>Event ID 13: RegistryEvent (Value Set)</li>
+  <li>Event ID 14: RegistryEvent (Key and Value Rename)</li>
+  <li>Event ID 15: FileCreateStreamHash</li>
+  <li>Event ID 255: Error</li>
+</ul>
+
+<p>详情见https://technet.microsoft.com/en-us/sysinternals/sysmon</p>
+
+<p><strong>注：</strong></p>
+
+<p>CreateRemoteThread为Event ID 8</p>
+
+<h3 id="dll注入">Dll注入</h3>
+
+<p>常见方法：</p>
+
+<ul>
+  <li>创建新线程</li>
+  <li>设置线程上下背景文，修改寄存器</li>
+  <li>插入Apc队列</li>
+  <li>修改注册表</li>
+  <li>挂钩窗口消息</li>
+  <li>远程手动实现LoadLibrary</li>
+</ul>
+
+<p>引用自http://www.cnblogs.com/uAreKongqi/p/6012353.html</p>
+
+<h3 id="shellcode-injection-via-queueuserapc---hiding-from-sysmon">Shellcode Injection via QueueUserAPC - Hiding From Sysmon：</h3>
+
+<p>c#实现，通过调用QueueUserAPC执行shellcode，可应用于InstallUtil.exe和Msbuild.exe，能够绕过Sysmon对Event ID 8: CreateRemoteThread的监控</p>
+
+<p><strong>文章地址：</strong></p>
+
+<p>http://subt0x10.blogspot.com/2017/01/shellcode-injection-via-queueuserapc.html</p>
+
+<h2 id="0x02-sysmon简介">0x02 Sysmon简介</h2>
+<hr>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://technet.microsoft.com/en-us/sysinternals/sysmon</p>
+
+<p>以系统服务和驱动的方式安装在系统上</p>
+
+<p>用来监控和记录系统活动，并记录到windows事件日志中</p>
+
+<p>提供进程创建、网络连接以及文件创建时间更改等操作的详细信息</p>
+
+<p>通过事件日志，可识别异常活动，了解攻击者在网络上的操作</p>
+
+<p><strong>注：</strong></p>
+
+<p>系统安装Sysmon后，新增服务Sysmon</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-0.png" alt="Alt text"></p>
+
+<p>也就是说，如果攻击者获得了主机权限，通过查看已安装服务可以看到Sysmon的安装</p>
+
+<h3 id="安装">安装</h3>
+
+<p>以默认配置安装：</p>
+
+<p><code class="language-plaintext highlighter-rouge">sysmon -accepteula  –i -n</code></p>
+
+<p>以配置文件安装：</p>
+
+<p><code class="language-plaintext highlighter-rouge">sysmon -c config.xml</code></p>
+
+<p>配置文件config.xml格式示例如下：</p>
+
+<p><strong>注：</strong></p>
+
+<p>xml大小写敏感</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;Sysmon schemaversion="3.20"&gt;      
+&lt;!-- Capture all hashes --&gt;      
+&lt;HashAlgorithms&gt;*&lt;/HashAlgorithms&gt;      
+&lt;EventFiltering&gt;        
+&lt;!-- Log all drivers except if the signature --&gt;       
+ &lt;!-- contains Microsoft or Windows --&gt;       
+ &lt;DriverLoad onmatch="exclude"&gt;          
+&lt;Signature condition="contains"&gt;microsoft&lt;/Signature&gt;         
+ &lt;Signature condition="contains"&gt;windows&lt;/Signature&gt;        
+&lt;/DriverLoad&gt;       
+ &lt;!-- Do not log process termination --&gt;        
+&lt;ProcessTerminate onmatch="include" /&gt;       
+ &lt;!-- Log network connection if the destination port equal 443 --&gt;        
+&lt;!-- or 80, and process isn't InternetExplorer --&gt;        
+&lt;NetworkConnect onmatch="include"&gt;          
+&lt;DestinationPort&gt;443&lt;/DestinationPort&gt;          
+&lt;DestinationPort&gt;80&lt;/DestinationPort&gt;        
+&lt;/NetworkConnect&gt;        
+&lt;NetworkConnect onmatch="exclude"&gt;          
+&lt;Image condition="end with"&gt;iexplore.exe&lt;/Image&gt;       
+ &lt;/NetworkConnect&gt;     
+ &lt;/EventFiltering&gt;    
+&lt;/Sysmon&gt;
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>该示例引用自http://www.freebuf.com/sectool/122779.html</p>
+
+<h3 id="查看配置">查看配置</h3>
+
+<p><code class="language-plaintext highlighter-rouge">sysmon -c</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>配置属性保存在注册表如下位置：</p>
+
+<p><code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\services\SysmonDrv\Parameters</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-01.png" alt="Alt text"></p>
+
+<h3 id="查看日志记录">查看日志记录</h3>
+
+<p>1.通过面板</p>
+
+<p>位置如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Control Panel\System and Security-View event logs</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">Applications and Services Logs-Microsoft-Windows-Sysmon-Operational</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-02.png" alt="Alt text"></p>
+
+<p>2.通过powershell查看，命令如下：</p>
+
+<p>(管理员权限)</p>
+
+<p><code class="language-plaintext highlighter-rouge">Get-WinEvent -FilterHashtable @{logname="Microsoft-Windows-Sysmon/Operational";}</code></p>
+
+<h3 id="监控并记录createremotethread">监控并记录CreateRemoteThread</h3>
+
+<p>配置文件如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;Sysmon schemaversion="3.20"&gt;      
+&lt;!-- Capture all hashes --&gt;      
+&lt;HashAlgorithms&gt;*&lt;/HashAlgorithms&gt;      
+ &lt;EventFiltering&gt;        
+&lt;!-- Log all drivers except if the signature --&gt;       
+ &lt;!-- contains Microsoft or Windows --&gt;       
+&lt;CreateRemoteThread onmatch="include"&gt;
+&lt;TargetImage condition="end with"&gt;calc.exe&lt;/TargetImage&gt;
+&lt;/CreateRemoteThread&gt;
+ &lt;/EventFiltering&gt;    
+&lt;/Sysmon&gt;
+</code></pre></div></div>
+
+<p>保存为RecordCreateRemoteTh.xml</p>
+
+<p><strong>注：</strong></p>
+
+<p>该配置文件表示对进程calc.exe监控，如果捕获到CreateRemoteThread，将会写入事件日志</p>
+
+<p>安装配置文件：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Sysmon.exe -c RecordCreateRemoteTh.xml</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-1.png" alt="Alt text"></p>
+
+<p>查看配置信息</p>
+
+<p><code class="language-plaintext highlighter-rouge">Sysmon.exe -c</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-2.png" alt="Alt text"></p>
+
+<p>启动calc.exe</p>
+
+<p>执行CreateRemoteTh.exe，calc.exe被注入，弹框，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-3.png" alt="Alt text"></p>
+
+<p>CreateRemoteTh.exe的源代码可参照：</p>
+
+<p>https://github.com/3gstudent/CreateRemoteThread/blob/master/CreateRemoteThreadTest.cpp</p>
+
+<p>查看日志，发现Event ID 8</p>
+
+<p>如下图，检测到CreateRemoteThread</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-4.png" alt="Alt text"></p>
+
+<p>通过powershell查看Event ID 8</p>
+
+<p><code class="language-plaintext highlighter-rouge">Get-WinEvent -FilterHashtable @{logname="Microsoft-Windows-Sysmon/Operational";ID=8}</code></p>
+
+<p>如下图，获取日志Event ID 8</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/2-5.png" alt="Alt text"></p>
+
+<h2 id="0x03-c实现通过apc对dll注入">0x03 c++实现通过APC对Dll注入</h2>
+<hr>
+
+<p>使用APC注入：</p>
+
+<p>代码如下：</p>
+
+<p>https://github.com/3gstudent/Inject-dll-by-APC/blob/master/test.cpp</p>
+
+<p>关于代码的详细说明可参照：</p>
+
+<p>http://blogs.microsoft.co.il/pavely/2017/03/14/injecting-a-dll-without-a-remote-thread/</p>
+
+<p>如图，成功注入到calc.exe</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/3-1.png" alt="Alt text"></p>
+
+<p>使用ProcessExplorer查看calc.exe加载的dll，如下图，成功注入testdll</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-6/3-2.png" alt="Alt text"></p>
+
+<p>查看日志，并没有产生Event ID 8，成功绕过Sysmon对CreateRemoteThread的监控</p>
+
+<h2 id="0x04-casey-smithsubtee分享的c实现代码和用途">0x04 Casey Smith@subTee分享的C#实现代码和用途</h2>
+<hr>
+
+<p>可应用到 InstallUtil.exe和Msbuild.exe的利用上面</p>
+
+<p><strong>InstallUtil.exe：</strong></p>
+
+<p>https://gist.github.com/subTee/7bbd8e995ed8e8b1f8dab1dc926def8a</p>
+
+<p><strong>Msbuild.exe：</strong></p>
+
+<p>https://gist.github.com/subTee/cf3e1b06cf58fcc9e0255190d30c2d38</p>
+
+<p>调用过程中没有产生Event ID 8</p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文对Sysmon的监控功能做了测试，并介绍如何通过APC实现Dll注入，绕过Sysmon对CreateRemoteThread的监控</p>
+
+<p>在特定环境下，如果无法手动关闭Sysmon服务，利用APC能在一定程度上绕过Sysmon对CreateRemoteThread的监控</p>
+
+<p><strong>参考资料：</strong></p>
+
+<p>http://subt0x10.blogspot.com/2017/01/shellcode-injection-via-queueuserapc.html</p>
+
+<p>https://www.darkoperator.com/blog/2014/8/8/sysinternals-sysmon</p>
+
+<p>http://www.freebuf.com/sectool/122779.html</p>
+
+<p>http://www.cnblogs.com/uAreKongqi/p/6012353.html</p>
+
+<p>http://blogs.microsoft.co.il/pavely/2017/03/14/injecting-a-dll-without-a-remote-thread/</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+  </div>
+
+  <div class="date">
+    Written on April  6, 2017
+  </div>
+
+  
+</article>

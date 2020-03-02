@@ -1,0 +1,414 @@
+<article class="post">
+  <h1>Hidden Alternative Data Streams的进阶利用技巧</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试中，ADS(供选数据流/ alternate data stream)通常用于在文件中隐藏payload，这种方式最大的优点是不影响文件大小，普通用户很难察觉</p>
+
+<p>为此，微软提供了<code class="language-plaintext highlighter-rouge">"dir /r"</code>操作，可用来查看文件的ADS，同时，Win XP以后的系统禁止用户从ADS里直接执行程序，限制了ADS的利用</p>
+
+<p>然而，通过一些特殊用法和技巧，我们能够更好的隐藏ADS，并且能够从ADS里直接执行程序 ：）</p>
+
+<p><strong>说明：</strong></p>
+
+<p>写本文的初衷是偶然看到了一篇有趣的文章，作者：lex Inführ，地址如下：</p>
+
+<p>http://insert-script.blogspot.co.at/2012/11/hidden-alternative-data-streams.html</p>
+
+<p>该文章介绍了一些绕过ADS检测工具的技巧，并给出了通过wmi执行ADS的方法</p>
+
+<p>本文将基于lex Inführ的文章，结合我的研究心得，对ADS的利用技巧作扩充，分享如何清除这些特殊的ADS，帮助大家提升对ADS的认识</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>ADS常规利用方法</li>
+  <li>ADS常规检测工具</li>
+  <li>特殊ADS对检测工具的绕过</li>
+  <li>特殊ADS的清除</li>
+  <li>防御建议</li>
+</ul>
+
+<h2 id="0x02-常规利用">0x02 常规利用</h2>
+<hr>
+
+<h3 id="ads">ADS：</h3>
+
+<p>适用于NTFS文件系统,基础知识可参考如下文章：</p>
+
+<p>http://www.freebuf.com/articles/73270.html</p>
+
+<h3 id="创建ads">创建ADS：</h3>
+
+<p>对文件，命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">echo test1 &gt; test.txt:ThisIsAnADS</code></p>
+
+<p>创建成功后，test.txt文件大小不变</p>
+
+<p>对文件夹，命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">echo test1 &gt; c:\test\ads\1:ThisIsAnADS</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>需要绝对路径</p>
+
+<h3 id="查看文件中的ads">查看文件中的ADS：</h3>
+
+<p>命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">dir /r</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/2-1.png" alt="Alt text"></p>
+
+<p>可获得文件夹和文件中包含的ADS信息</p>
+
+<h3 id="查看ads内容">查看ADS内容：</h3>
+
+<p>命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">more &lt; test.txt:ThisIsAnADS</code></p>
+
+<p>如下图，获得ADS的具体内容</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/2-2.png" alt="Alt text"></p>
+
+<h3 id="删除ads">删除ADS:</h3>
+
+<p>命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">more &lt; test.txt &gt; testcopy.txt</code></p>
+
+<p>使用more命令查看文件的主数据流并输出，即可变相实现ADS的删除</p>
+
+<p>如下图，testcopy.txt不包含多余ADS</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/2-3.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>more命令在显示较长数据时会截断，逐屏显示输出，这里面就存在一个bug，如果文件过大，导致more命令需要分屏显示的时候，就会造成数据显示不完整，导致文件生成失败</p>
+
+<h2 id="0x03-ads的执行">0x03 ADS的执行</h2>
+<hr>
+
+<h3 id="1通过wmi">1、通过wmi</h3>
+
+<p>命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">type putty.exe &gt; test.txt:putty.exe</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">wmic process call create c:\test\test.txt:putty.exe</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/2-4.png" alt="Alt text"></p>
+
+<p>程序执行后，进程名为<code class="language-plaintext highlighter-rouge">test.txt:putty.exe</code></p>
+
+<h3 id="2通过powershell">2、通过powershell</h3>
+
+<p>代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ps = new-object System.Diagnostics.Process
+$ps.StartInfo.Filename= "c:\test\test.txt:putty.exe"
+$ps.StartInfo.RedirectStandardOutput = $True
+$ps.StartInfo.UseShellExecute = $False
+$ps.start()
+</code></pre></div></div>
+
+<h2 id="0x04-常规检测工具">0x04 常规检测工具</h2>
+<hr>
+
+<h3 id="1adscheckexe">1、ADSCheck.exe</h3>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://sourceforge.net/projects/adscheck/</p>
+
+<p><strong>查看ADS：</strong></p>
+
+<p>可查看指定文件夹下所有文件</p>
+
+<p>命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">ADSCheck.exe c:\test\ads</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/3-1.png" alt="Alt text"></p>
+
+<p><strong>删除ADS：</strong></p>
+
+<p>可删除指定路径下的所有ADS</p>
+
+<p>命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">ADSCheck.exe c:\test\ads /d</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/3-2.png" alt="Alt text"></p>
+
+<h3 id="2streamsexe">2、Streams.exe</h3>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://technet.microsoft.com/en-us/sysinternals/streams.aspx</p>
+
+<p><strong>查看ADS：</strong></p>
+
+<p>查看单个文件</p>
+
+<p>命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">streams.exe c:\test\ads\test.txt</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/3-3.png" alt="Alt text"></p>
+
+<p><strong>删除ADS：</strong></p>
+
+<p>删除单个文件的ADS</p>
+
+<p>命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">streams.exe -d c:\test\ads\test.txt</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/3-4.png" alt="Alt text"></p>
+
+<h3 id="实例测试">实例测试：</h3>
+
+<p>浏览器下载的文件在打开时会弹框提示</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/3-5.png" alt="Alt text"></p>
+
+<p><strong>原因：</strong></p>
+
+<p>下载的文件默认添加adsZone.Identifier:$DATA</p>
+
+<p><strong>验证：</strong></p>
+
+<p>查看ADS：</p>
+
+<p><code class="language-plaintext highlighter-rouge">more &lt; putty_download.exe:Zone.Identifier:$DATA</code></p>
+
+<p>获得内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[ZoneTransfer]
+ZoneId=3
+</code></pre></div></div>
+
+<p>去除ADS：</p>
+
+<p>无法使用more命令，因为putty_download.exe过大，需要分屏显示，导致文件生成失败</p>
+
+<p>可使用streams.exe</p>
+
+<p>去除ADS后，打开文件不再弹框提示</p>
+
+<h2 id="0x05-特殊ads">0x05 特殊ADS</h2>
+<hr>
+
+<h3 id="1文件">1、…文件</h3>
+
+<p>创建特殊文件…</p>
+
+<p>命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">type putty.exe &gt; ...:putty.exe</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">wmic process call create c:\test\ads\...:putty.exe</code></p>
+
+<p>putty.exe成功执行,进程名为<code class="language-plaintext highlighter-rouge">...:putty.exe</code></p>
+
+<p><strong>特别的地方：</strong></p>
+
+<p>(1) ADS被隐藏</p>
+
+<ul>
+  <li>dir /r无法查询</li>
+  <li>工具ADSCheck.exe和streams.exe显示不存在ADS</li>
+</ul>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/4-1.png" alt="Alt text"></p>
+
+<p>(2) 该文件无法被删除</p>
+
+<p>尝试各种方法，无法删除，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/4-2.png" alt="Alt text"></p>
+
+<h3 id="2特殊com文件">2、特殊COM文件</h3>
+
+<p>创建特殊名称文件COM1</p>
+
+<p><strong>注：</strong></p>
+
+<p>经测试，系统目前支持的文件名称为COM1至COM9
+必须有前缀<code class="language-plaintext highlighter-rouge">\\.\</code>，否则提示系统找不到指定文件</p>
+
+<p><strong>补充1：</strong></p>
+
+<p>特殊名称<code class="language-plaintext highlighter-rouge">nul</code>也有同样效果,该方法由Evi1cg测试得出</p>
+
+<p><strong>补充2：</strong></p>
+
+<p>其他特殊文件格式也可以隐藏ADS，包括如下格式的后缀名：</p>
+
+<p>CON、AUX、PRN、LPT1、LPT2、LPT3、LPT4、LPT5、LPT6、LPT7、LPT8、LPT9</p>
+
+<p>eg：</p>
+
+<p><code class="language-plaintext highlighter-rouge">type putty.exe &gt; \\.\C:\test\ads\LPT4:putty.exe</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>更多特殊文件名称可参考：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/desktop/FileIO/naming-a-file#naming-conventions</p>
+
+<p><strong>补充3：</strong></p>
+
+<p>也可以使用前缀<code class="language-plaintext highlighter-rouge">\\?\</code>，具有相同效果</p>
+
+<p>命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">type putty.exe &gt; \\.\C:\test\ads\COM1:putty.exe</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">wmic process call create \\.\C:\test\ads\COM1:putty.exe</code></p>
+
+<p><strong>注：</strong></p>
+
+<p><em>执行<code class="language-plaintext highlighter-rouge">wmic process call create c:\test\ads\COM1:putty.exe</code>不会执行程序</em></p>
+
+<p>putty.exe成功执行,进程名为COM1:putty.exe</p>
+
+<p><strong>特别的地方：</strong></p>
+
+<p>(1) ADS被隐藏</p>
+
+<ul>
+  <li>dir /r无法查询</li>
+  <li>工具ADSCheck.exe和streams.exe显示不存在ADS</li>
+</ul>
+
+<p>(2) 无法直接删除</p>
+
+<h3 id="3磁盘根目录">3、磁盘根目录</h3>
+
+<p>管理员权限</p>
+
+<p><code class="language-plaintext highlighter-rouge">type putty.exe &gt;C:\:putty.exe</code>
+<code class="language-plaintext highlighter-rouge">wmic process call create C:\:putty.exe</code></p>
+
+<p>putty.exe成功执行,进程名为<code class="language-plaintext highlighter-rouge">:putty.exe</code></p>
+
+<p><strong>特别的地方：</strong></p>
+
+<p>(1) ADS被隐藏</p>
+
+<ul>
+  <li>dir /r 无法查到</li>
+  <li>使用streams.exe可以查看</li>
+</ul>
+
+<p>(2) 无法直接删除</p>
+
+<h2 id="0x06-特殊ads的清除">0x06 特殊ADS的清除</h2>
+<hr>
+
+<h3 id="1文件-1">1、…文件</h3>
+
+<p>方法1：</p>
+
+<p>删除该目录下所有文件：</p>
+
+<p><code class="language-plaintext highlighter-rouge">del *.*</code></p>
+
+<p>但是不现实</p>
+
+<p>方式2：</p>
+
+<p>使用短文件名</p>
+
+<p><code class="language-plaintext highlighter-rouge">dir /x</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-5/5-1.png" alt="Alt text"></p>
+
+<p>找到…文件对应的短文件名为<code class="language-plaintext highlighter-rouge">A535~1</code></p>
+
+<p>命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">del A535~1</code></p>
+
+<p>成功删除</p>
+
+<h3 id="2特殊com文件-1">2、特殊COM文件</h3>
+
+<p>命令行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">del \\.\C:\test\ads\COM1</code></p>
+
+<h3 id="3磁盘根目录-1">3、磁盘根目录</h3>
+
+<p>使用streams.exe</p>
+
+<p>管理员权限：</p>
+
+<p><code class="language-plaintext highlighter-rouge">streams.exe -d  C:\</code></p>
+
+<h2 id="0x07-防御建议">0x07 防御建议</h2>
+<hr>
+
+<p>对于用户来说，如果在系统中发现特殊名称的文件并且无法删除，需要提高警惕，也许其中会包含payload</p>
+
+<p>对照本文，特殊文件及清除方法如下：</p>
+
+<p>(1) …</p>
+
+<p>借助短文件名删除</p>
+
+<p>(2) COM1-COM9</p>
+
+<p>del \.\C:\test\ads\COM1</p>
+
+<p>(3) 磁盘根目录</p>
+
+<p>借助streams.exe查看和删除</p>
+
+<h2 id="0x08-小结">0x08 小结</h2>
+<hr>
+
+<p>本文介绍了进一步隐藏ADS的利用技巧，结合攻击方式分享了具体的清除方法和防御建议，希望能够帮助大家</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on May  5, 2017
+  </div>
+
+  
+</article>

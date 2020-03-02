@@ -1,0 +1,276 @@
+<article class="post">
+  <h1>Joomla 3.4.4-3.6.3 Account Creation &amp;Privilege Escalation测试记录</h1>
+
+  <div class="entry">
+    <h2 id="0x00-简介">0x00 简介</h2>
+<hr>
+
+<p>涉及漏洞：</p>
+
+<ul>
+  <li>CVE-2016-8869</li>
+  <li>CVE-2016-8870</li>
+</ul>
+
+<p>利用上述漏洞，攻击者可以注册特权用户</p>
+
+<p><strong>POC:</strong></p>
+
+<p>https://github.com/XiphosResearch/exploits/tree/master/Joomraa</p>
+
+<p>https://www.exploit-db.com/exploits/40637/?rss</p>
+
+<p><strong>分析文章：</strong></p>
+
+<p>http://paper.seebug.org/88/</p>
+
+<p>http://paper.seebug.org/86/</p>
+
+<p><strong>注：</strong></p>
+
+<p>0x01和0x02内容节选自分析文章</p>
+
+<p>http://paper.seebug.org/88/</p>
+
+<p>http://paper.seebug.org/86/</p>
+
+<h2 id="0x01-cve-2016-8870">0x01 CVE-2016-8870</h2>
+<hr>
+
+<h3 id="漏洞影响">漏洞影响</h3>
+
+<p>网站关闭注册的情况下仍可创建用户</p>
+
+<h3 id="影响版本">影响版本</h3>
+
+<p>3.4.4 to 3.6.3</p>
+
+<h3 id="漏洞原理">漏洞原理</h3>
+
+<p>存在两个用于用户注册的方法：</p>
+
+<p>位于components/com_users/controllers/registration.php中的UsersControllerRegistration::register()</p>
+
+<p>位于components/com_users/controllers/user.php中的UsersControllerUser::register()</p>
+
+<p>相对于UsersControllerRegistration::register()，UsersControllerUser::register()的实现中并没有这几行代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>// If registration is disabled - Redirect to login page.
+if (JComponentHelper::getParams('com_users')-&gt;get('allowUserRegistration') == 0)  
+{
+    $this-&gt;setRedirect(JRoute::_('index.php?option=com_users&amp;view=login', false));
+
+    return false;
+}
+</code></pre></div></div>
+
+<p>这几行代码是检查是否允许注册，也就是说如果我们可以用UsersControllerUser::register()这个方法来进行注册就可以绕过这个检测</p>
+
+<h3 id="补丁分析">补丁分析</h3>
+
+<p>官方删除了UsersControllerUser::register()方法</p>
+
+<p><strong>注：</strong></p>
+
+<p>以上引用自http://paper.seebug.org/86/</p>
+
+<h2 id="0x02-cve-2016-8869">0x02 CVE-2016-8869</h2>
+<hr>
+
+<h3 id="漏洞影响-1">漏洞影响</h3>
+
+<p>网站关闭注册的情况下仍可创建特权用户</p>
+
+<h3 id="影响版本-1">影响版本</h3>
+
+<p>3.4.4 to 3.6.3</p>
+
+<h3 id="漏洞原理-1">漏洞原理</h3>
+
+<p>构造特殊的请求包实现对用来表示权限的groups进行赋值</p>
+
+<h3 id="补丁分析-1">补丁分析</h3>
+
+<p>官方删除了UsersControllerUser::register()方法</p>
+
+<p><strong>注：</strong></p>
+
+<p>以上引用自http://paper.seebug.org/88/</p>
+
+<h2 id="0x03-实际测试">0x03 实际测试</h2>
+<hr>
+<p><strong>测试系统：</strong></p>
+
+<p>Win8.1 x86</p>
+
+<h3 id="1搭建php环境">1、搭建php环境</h3>
+
+<p>下载安装phpStudy</p>
+
+<p>安装后如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/2-1.png" alt="Alt text"></p>
+
+<p>配置目录为：C:\WWW</p>
+
+<h3 id="2配置joomla环境">2、配置Joomla环境</h3>
+
+<p>下载3.6.3版本的Joomla，地址如下：</p>
+
+<p>https://github.com/joomla/joomla-cms/releases/download/3.6.3/Joomla_3.6.3-Stable-Full_Package.tar.gz</p>
+
+<p>解压后将文件放于C:\WWW下</p>
+
+<p>访问http://localhost进入安装页面</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/2-2.png" alt="Alt text"></p>
+
+<p>数据库类型选择MySQL，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/2-3.png" alt="Alt text"></p>
+
+<p>登陆数据库，默认密码为root</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/2-4.png" alt="Alt text"></p>
+
+<p>等待安装完成</p>
+
+<h3 id="3网页登陆测试">3、网页登陆，测试</h3>
+
+<p>环境配置成功，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/3-1.png" alt="Alt text"></p>
+
+<h3 id="4poc测试">4、poc测试</h3>
+
+<p><strong>poc地址：</strong></p>
+
+<p>https://github.com/XiphosResearch/exploits/tree/master/Joomraa</p>
+
+<p><strong>参数如下：</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>joomraa.py  -u hacker -p password -e hacker@example.com http://192.168.1.111
+</code></pre></div></div>
+
+<p>如下图，提示需要登陆邮箱查看激活邮件，所以邮箱参数需要填写真实的邮箱地址</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/3-2.png" alt="Alt text"></p>
+
+<p>此时查看Joomla后台，发现用户添加成功，但是状态为未激活，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/3-3.png" alt="Alt text"></p>
+
+<h3 id="5设置joomla开启发送激活邮件的功能">5、设置Joomla，开启发送激活邮件的功能</h3>
+
+<p>选择Global Configuration-Global-Server</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/3-4.png" alt="Alt text"></p>
+
+<p>设置邮箱参数</p>
+
+<p><strong>注：</strong>
+邮箱账户需要开启SMTP功能</p>
+
+<p>选择<code class="language-plaintext highlighter-rouge">Send Test Mail</code>验证邮箱，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/5-1.png" alt="Alt text"></p>
+
+<p>如图，验证邮件接收成功</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/3-5.png" alt="Alt text"></p>
+
+<h3 id="6再次测试poc">6、再次测试POC</h3>
+
+<p>成功收到激活邮件，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/3-6.png" alt="Alt text"></p>
+
+<p>点开链接后报错，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/3-7.png" alt="Alt text"></p>
+
+<p>查看Joomla源码，位置如下：</p>
+
+<p>https://github.com/joomla/joomla-cms/blob/staging/components/com_users/controllers/registration.php</p>
+
+<p>找到问题原因： <code class="language-plaintext highlighter-rouge">If user registration or account activation is disabled, throw a 403.</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/5-2.png" alt="Alt text"></p>
+
+<h3 id="7开启用户注册功能">7、开启用户注册功能</h3>
+
+<p>选择Global Configuration-Users-User Options，点击允许用户注册，如图
+<img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/4-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>自Joomla3.4以后，用户注册功能默认关闭</p>
+
+<h3 id="8最后测试">8、最后测试</h3>
+
+<p>开启用户注册功能后，再次点击激活邮件，成功激活账户</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/4-2.png" alt="Alt text"></p>
+
+<p>后台显示用户激活，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-10-31/4-3.png" alt="Alt text"></p>
+
+<h3 id="9得出最终结论">9、得出最终结论</h3>
+
+<p>利用该漏洞可在网站后台关闭用户注册的情况下创建特权用户，但是状态为未激活</p>
+
+<p>只有网站后台开启发送邮件的功能后，攻击者邮箱才能收到激活邮件</p>
+
+<p>只有网站后台开启用户注册功能，激活码才能生效，使得用户被激活</p>
+
+<p>未激活的用户无法用于登录</p>
+
+<p>高于3.4版本的Joomla，用户注册功能默认关闭</p>
+
+<p>Joomla升级到3.6.4后，测试poc显示攻击成功，然而网站后台并没有添加用户，也不会发送激活邮件，防御成功</p>
+
+<p>综上，<code class="language-plaintext highlighter-rouge">攻击者想要获得网站后台管理员权限，需要同时满足以下条件：</code></p>
+
+<ul>
+  <li>Joomla版本为3.4.4-3.6.3</li>
+  <li>网站后台开启发送邮件功能</li>
+  <li>网站后台开启用户注册功能</li>
+</ul>
+
+<h2 id="0x04-备注">0x04 备注</h2>
+<hr>
+<p>感谢DM的帮助</p>
+
+<p>本文仅为测试记录</p>
+
+<p>根据POC开发了一个检查网站是否开放注册功能的python脚本，地址如下：</p>
+
+<p>https://github.com/3gstudent/Test-Exploit-for-Joomla-3.4.4-3.6.4</p>
+
+<p>可用来简单判断网站是否支持用户注册</p>
+
+<p><strong>在此提醒网站管理员，尽快升级Joomla，如果Joomla版本过低，并且开启发送邮件和用户注册功能，那么很容易遭到攻击。</strong></p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+  </div>
+
+  <div class="date">
+    Written on October 31, 2016
+  </div>
+
+  
+</article>

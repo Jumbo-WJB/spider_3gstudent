@@ -1,0 +1,299 @@
+<article class="post">
+  <h1>CAT文件数字签名使用技巧</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Windows系统中的重要文件常常会被添加数字签名，用来防止被篡改，部分白名单规则的判定也会基于数字签名。</p>
+
+<p>本文作为数字签名研究系列文章的基础内容，介绍两种数字签名的添加方法，分析CAT文件数字签名的特点，并且纠正一名读者对我文章的回复，地址如下：</p>
+
+<p><a href="http://www.4hou.com/technology/6969.html">《利用xwizard.exe加载dll》</a></p>
+
+<p>基于我的测试，个人认为：<code class="language-plaintext highlighter-rouge">移动位置后，CAT文件数字签名不会失效</code></p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>生成证书的方法</li>
+  <li>将数字签名添加在文件末尾的方法(Authenticode)</li>
+  <li>将数字签名保存在CAT文件中的方法(catalog)</li>
+  <li>使用CAT数字签名的文件特点</li>
+</ul>
+
+<h2 id="0x02-将数字签名添加在文件末尾的方法authenticode">0x02 将数字签名添加在文件末尾的方法(Authenticode)</h2>
+<hr>
+
+<p>曾在隐写技巧的系列文章中研究过在数字签名中隐藏payload的方法，地址如下：</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/%E9%9A%90%E5%86%99%E6%8A%80%E5%B7%A7-%E5%9C%A8PE%E6%96%87%E4%BB%B6%E7%9A%84%E6%95%B0%E5%AD%97%E8%AF%81%E4%B9%A6%E4%B8%AD%E9%9A%90%E8%97%8FPayload/">《隐写技巧——在PE文件的数字证书中隐藏Payload》</a></p>
+
+<p>文中介绍过证书格式，在此不再赘述</p>
+
+<p>向文件尾部添加数字签名后，可通过文件属性查看</p>
+
+<p>实例：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Windows\System32\consent.exe</code></p>
+
+<p>自带微软数字签名，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/2-1.png" alt="Alt text"></p>
+
+<p>可通过powershell验证数字签名：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-AuthenticodeSignature .\mimikatz.exe
+</code></pre></div></div>
+
+<p>也可以使用工具通过命令行查看数字签名</p>
+
+<p>使用signtool.exe查看：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>signtool.exe verify /v C:\Windows\System32\consent.exe
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/2-2.png" alt="Alt text"></p>
+
+<p>使用sigcheck.exe查看：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sigcheck.exe -q C:\Windows\System32\consent.exe /accepteula
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/2-3.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>signtool.exe:</p>
+
+<p>可用于查看文件的数字签名</p>
+
+<p>安装Visual Studio后包含SDK，其中可找到signtool.exe，位于<code class="language-plaintext highlighter-rouge">C:\Program Files\Microsoft SDKs\Windows\</code></p>
+
+<p>进入开发人员工具的cmd可直接调用signtool.exe</p>
+
+<p>Windows 7 SDK下载地址：</p>
+
+<p>https://www.microsoft.com/en-us/download/details.aspx?id=8279</p>
+
+<p>sigcheck.exe:</p>
+
+<p>可用于查看文件的数字签名</p>
+
+<p>下载地址：</p>
+
+<p>https://docs.microsoft.com/zh-cn/sysinternals/downloads/sigcheck</p>
+
+<p>本文相关文件已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/signtools</p>
+
+<p>生成测试证书的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>makecert -n "CN=Microsoft Windows Test" -r -sv Root.pvk Root.cer
+cert2spc Root.cer Root.spc
+pvk2pfx -pvk Root.pvk -pi 123456 -spc Root.spc -pfx Root.pfx -f
+</code></pre></div></div>
+
+<p>证书注册：</p>
+
+<p>(管理员权限)</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certmgr.exe -add -c Root.cer -s -r localmachine root
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>细节可参考之前的文章《A dirty way of tricking users to bypass UAC》</p>
+
+<p>签名mimikatz.exe：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>signtool sign /f Root.pfx /p 123456 mimikatz.exe
+</code></pre></div></div>
+
+<p>显示数字签名正常，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/2-4.png" alt="Alt text"></p>
+
+<h2 id="0x03-将数字签名保存在cat文件中的方法catalog">0x03 将数字签名保存在CAT文件中的方法(catalog)</h2>
+<hr>
+
+<p>Windows系统中，有些文件通过文件属性无法获得其数字签名信息，但是这些文件也包含数字签名，这里的数字签名指的就是CAT(安全编录)文件数字签名(catalog signing)</p>
+
+<p>资料可参考:</p>
+
+<p>https://docs.microsoft.com/en-us/windows-hardware/drivers/install/catalog-files</p>
+
+<p>签名流程的直观理解：</p>
+
+<ul>
+  <li>将文件作sha1加密后得到的hash值保存在CAT文件中（一个CAT文件可保存多个文件hash）</li>
+  <li>对该CAT文件添加数字签名</li>
+  <li>将CAT文件添加到系统的安全编录数据库</li>
+  <li>这些文件也就有了数字签名</li>
+</ul>
+
+<p>实例：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Windows\System32\catroot\{F750E6C3-38EE-11D1-85E5-00C04FC295EE}\ntph.cat</code></p>
+
+<p>属性-安全目录-项目详细信息-File,可以找到Hash值对应的文件</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/3-1.png" alt="Alt text"></p>
+
+<p>通过文件属性无法查看CAT数字签名</p>
+
+<p>.cat文件保存格式为ASN.1标准，直接通过记事本无法查看，需要解密，在线网址如下：</p>
+
+<p>https://lapo.it/asn1js/</p>
+
+<p>选择cat文件后即可解密显示完整格式</p>
+
+<p>格式解析可参考：</p>
+
+<p>https://support.microsoft.com/en-us/help/287547/object-ids-associated-with-microsoft-cryptography</p>
+
+<p>实例：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Windows\System32\xwizard.exe</code></p>
+
+<p>自带CAT格式的数字签名，通过文件属性无法查看CAT数字签名</p>
+
+<p>使用powershell无法获得CAT文件数字签名：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-AuthenticodeSignature C:\Windows\System32\xwizard.exe
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/3-11.png" alt="Alt text"></p>
+
+<p>注:</p>
+
+<p>Win10系统能够获取CAT文件数字签名,Win7不可以</p>
+
+<p>但可以使用signtool.exe和sigcheck.exe查看数字签名</p>
+
+<p>使用signtool.exe查看：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>signtool.exe verify /pa /a /v C:\Windows\System32\xwizard.exe
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/3-2.png" alt="Alt text"></p>
+
+<p>使用sigcheck.exe查看：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sigcheck.exe -q C:\Windows\System32\xwizard.exe /accepteula
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/3-3.png" alt="Alt text"></p>
+
+<p>下面介绍如何使用CAT文件数字签名</p>
+
+<h3 id="1生成cat文件">1、生成CAT文件</h3>
+
+<p>新建文本文档cat.txt，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[CatalogHeader]
+Name=makecat1.cat
+[CatalogFiles]
+&lt;hash&gt;ExeFile1=mimikatz.exe
+
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>txt文件尾部需要一个空行，否则，在接下来的操作会报错，提示文件无法找到</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/3-4.png" alt="Alt text"></p>
+
+<p>使用makecat.exe生成cat文件：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>makecat -v cat.txt
+</code></pre></div></div>
+
+<h3 id="2使用证书为cat文件添加签名">2、使用证书为CAT文件添加签名</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>signtool sign /f Root.pfx /p 123456 makecat1.cat
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>这里的证书使用的是0x02中生成的证书<code class="language-plaintext highlighter-rouge">Root.pfx</code></p>
+
+<h3 id="3将cat文件添加到系统的安全编录数据库">3、将cat文件添加到系统的安全编录数据库</h3>
+
+<p>(管理员权限)</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>signtool catdb -v makecat1.cat
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>删除使用 -r参数：<code class="language-plaintext highlighter-rouge">signtool catdb -r makecat1.cat</code></p>
+
+<p>如果未添加到系统的安全编录数据库，签名状态为unsigned，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/3-5.png" alt="Alt text"></p>
+
+<p>添加到系统的安全编录数据库相当于在目录<code class="language-plaintext highlighter-rouge">C:\Windows\System32\catroot\{F750E6C3-38EE-11D1-85E5-00C04FC295EE}</code>添加文件makecat1.cat</p>
+
+<p>删除等价于删除目录<code class="language-plaintext highlighter-rouge">C:\Windows\System32\catroot\{F750E6C3-38EE-11D1-85E5-00C04FC295EE}</code>下对应的CAT文件makecat1.cat</p>
+
+<p>使用signtool.exe获取数字签名：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>signtool.exe verify /pa /a mimikatz.exe
+</code></pre></div></div>
+
+<p>使用sigcheck.exe获取数字签名：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sigcheck.exe -q mimikatz.exe /accepteula
+</code></pre></div></div>
+
+<p>移动位置后，签名仍然有效</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/3-6.png" alt="Alt text"></p>
+
+<p>验证结论：<strong>移动位置后，CAT文件数字签名不会失效</strong></p>
+
+<p>当然，利用带有CAT文件数字签名的xwizard.exe加载dll，在某种程度上说，能够绕过应用程序白名单的拦截。</p>
+
+<h2 id="0x04-小结">0x04 小结</h2>
+<hr>
+
+<p>本文介绍了两种数字签名的添加方法，分析CAT文件数字签名的特点，对于可执行文件，通过Process Explorer可验证两种不同的数字签名</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-8/4-1.png" alt="Alt text"></p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on October  8, 2017
+  </div>
+
+  
+</article>

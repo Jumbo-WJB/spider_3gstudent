@@ -1,0 +1,227 @@
+<article class="post">
+  <h1>利用globalAPIhooks在Win7系统下隐藏进程</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/Powershell-tricks-Hide-Process-by-kd.exe/">《Powershell tricks::Hide Process by kd.exe》</a>介绍过通过kd.exe隐藏进程的技巧，最大的缺点是需要开启Local kernel debugging模式，等待重启才能生效
+这次介绍另外一个隐藏进程的方法——利用global API hooks
+优点是即时生效，不需要等待系统重启</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要参照Sergey Podobry的文章，对该方法进行介绍，分析实际测试中需要注意的细节，并补全在64位下具体的参数设置</p>
+
+<p><strong>参考链接：</strong></p>
+
+<p>https://www.codeproject.com/articles/49319/easy-way-to-set-up-global-api-hooks?display=print</p>
+
+<p>https://github.com/subTee/AppInitGlobalHooks-Mimikatz</p>
+
+<h2 id="0x02-原理">0x02 原理</h2>
+<hr>
+
+<p>在用户层，通过global API hooks将测试dll注入到系统的所有进程，实现对指定进程的隐藏</p>
+
+<h3 id="hook方式">hook方式</h3>
+
+<p>修改注册表键值AppInit_DLLs</p>
+
+<p><strong>位置：</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows</code></p>
+
+<p><strong>参数说明：</strong></p>
+
+<p><strong>LoadAppInit_DLLs:</strong></p>
+
+<p>(REG_DWORD)	Value that globally enables or disables AppInit_DLLs.</p>
+<ul>
+  <li>0x0 – AppInit_DLLs are disabled.</li>
+  <li>0x1 – AppInit_DLLs are enabled.</li>
+</ul>
+
+<p><strong>AppInit_DLLs:</strong></p>
+
+<p>(REG_SZ)
+Space - or comma -separated list of DLLs to load. The complete path to the DLL should be specified using short file names.	C:\PROGRA~1\Test\Test.dll</p>
+
+<p><strong>RequireSignedAppInit_DLLs:</strong></p>
+
+<p>(REG_DWORD)	Require code-signed DLLs.</p>
+
+<ul>
+  <li>0x0 – Load any DLLs.</li>
+  <li>0x1 – Load only code-signed DLLs.</li>
+</ul>
+
+<h3 id="代码实现">代码实现</h3>
+
+<p>通过Mhook library实现API hooking</p>
+
+<p><strong>优点：</strong></p>
+
+<ul>
+  <li>开源</li>
+  <li>支持x86和x64</li>
+  <li>使用简便</li>
+</ul>
+
+<p><strong>参考地址：</strong></p>
+
+<p>http://codefromthe70s.org/mhook22.aspx</p>
+
+<h2 id="0x03-实际测试">0x03 实际测试</h2>
+<hr>
+
+<p><strong>测试环境：</strong></p>
+
+<p>Win7x86</p>
+
+<h3 id="1设置注册表键值appinit_dlls">1.设置注册表键值AppInit_DLLs</h3>
+
+<p><strong>参照代码：</strong></p>
+
+<p>https://github.com/subTee/AppInitGlobalHooks-Mimikatz/blob/master/AppInit.reg</p>
+
+<p>.reg文件如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows]
+"AppInit_DLLs"="C:\\Tools\\AppInitHookx64.dll,C:\\Tools\\AppInitHook.dll"
+"LoadAppInit_DLLs"=dword:00000001
+"RequireSignedAppInit_DLLs"=dword:00000000
+</code></pre></div></div>
+
+<p>表示</p>
+
+<ul>
+  <li>AppInit_DLLs are enabled</li>
+  <li>Load any DLLs，do not need code-signed DLLs</li>
+  <li>DLL path：C:\Tools\AppInitHookx64.dll,C:\Tools\AppInitHook.dll</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>设置的路径不能存在空格，否则失效</p>
+
+<h3 id="2编译生成appinithookdll并放在ctools下">2.编译生成AppInitHook.dll并放在C:\Tools下</h3>
+
+<p>参照工程：</p>
+
+<p>https://github.com/subTee/AppInitGlobalHooks-Mimikatz</p>
+
+<h3 id="3运行mimikatzexe">3.运行mimikatz.exe</h3>
+
+<p>任务管理器进程列表不存在mimikatz.exe</p>
+
+<p>Process Explorer不存在mimikatz.exe</p>
+
+<p>Tasklist.exe不存在mimikatz.exe</p>
+
+<p><strong>注：</strong></p>
+
+<p>此处没有完全隐藏进程，是将进程名设置为conhost.exe，这是因为mimikatz是控制台应用程序</p>
+
+<p>如果换成putty.exe或calc.exe这种Win32项目，则不存在这个问题，能够完全隐藏进程</p>
+
+<p>使用Process Explorer查看新建的进程，均加载了AppInitHook.dll，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-11/2-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>管理员权限运行Process Explorer，可查看高权限进程加载的dll</p>
+
+<h3 id="4win7x64测试">4.Win7x64测试</h3>
+
+<p>64位系统同32位系统的区别在注册表也有所体现</p>
+
+<p><strong>注：</strong></p>
+
+<p>详情可参考之前的文章《关于32位程序在64位系统下运行中需要注意的重定向问题》</p>
+
+<p>64位程序对应注册表位置：</p>
+
+<p><code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\</code></p>
+
+<p>32位程序对应注册表位置：</p>
+
+<p><code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\</code></p>
+
+<p>所以，如果要hook 64位系统下的所有进程(32位和64位)，需要修改两处注册表键值</p>
+
+<p>64位的注册表键值位置：</p>
+
+<p><code class="language-plaintext highlighter-rouge">[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\WindowsNT\CurrentVersion\Windows]</code></p>
+
+<p>32位的注册表键值位置：</p>
+
+<p><code class="language-plaintext highlighter-rouge">[HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows]</code></p>
+
+<p>具体修改代码已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/AppInitGlobalHooks-Mimikatz/blob/master/AppInit64.reg</p>
+
+<p>修改后使用Process Explorer查看如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-11/2-2.png" alt="Alt text"></p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-11/2-3.png" alt="Alt text"></p>
+
+<p>成功注入32位和64位进程</p>
+
+<h2 id="0x04-补充">0x04 补充</h2>
+<hr>
+
+<p>该方法只支持Win7 和 Windows Server 2008 R2，不支持更高版本如Win8、Server2012</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-11/2-4.png" alt="Alt text"></p>
+
+<p>如上图，在Win8系统，虽然成功加载AppInitHook.dll，但是无法隐藏进程</p>
+
+<p><strong>原因如下：</strong></p>
+
+<p>从Win8系统开始，微软对AppInit_DLLs做了限制：bios中默认开启的secure boot将会禁用AppInit_DLLs，使其失效</p>
+
+<p>详情可参照：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/windows/desktop/dn280412(v=vs.85).aspx</p>
+
+<h2 id="0x05-防御">0x05 防御</h2>
+<hr>
+
+<p>只针对Win7 和 Windows Server 2008 R2及以下系统</p>
+
+<p><strong>1.查看注册表键值</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\WindowsNT\CurrentVersion\Windows]</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">[HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows]</code></p>
+
+<p>AppInit_DLLs项有无可疑dll路径</p>
+
+<p><strong>2.通过Process Explorer查看进程有无加载可疑的dll</strong></p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文对利用global API hooks在Win7系统下隐藏进程的方法做了介绍，结合利用思路，帮助大家对这种利用方式进行更好的防御</p>
+
+<p>当然，利用global API hooks能做的还有更多</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+  </div>
+
+  <div class="date">
+    Written on April 11, 2017
+  </div>
+
+  
+</article>

@@ -1,0 +1,214 @@
+<article class="post">
+  <h1>Study Notes of using SilentCleanup to bypass UAC</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>最近我在James Forshaw‏的博客学到了一个Win10下绕过UAC的技巧，该方法通过脚本实现，并且目前微软还未对该绕过方法进行修复（预计在Win10 RS3修复）。经过我的学习测试，该方法同样适用于Win8，并且文中介绍的绕过思路很值得学习，因此整理成文，分享给大家。</p>
+
+<p>文章地址如下：</p>
+
+<p>https://tyranidslair.blogspot.co.uk/2017/05/exploiting-environment-variables-in.html</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>绕过思路</li>
+  <li>利用方法</li>
+  <li>防御检测</li>
+</ul>
+
+<h2 id="0x02-绕过思路">0x02 绕过思路</h2>
+<hr>
+
+<p>在之前文章也分享过一些绕过UAC思路的心得，可参考以下文章：</p>
+
+<p>https://3gstudent.github.io/3gstudent.github.io/Study-Notes-of-using-sdclt.exe-to-bypass-UAC/</p>
+
+<p>https://3gstudent.github.io/3gstudent.github.io/Study-Notes-Weekly-No.1(Monitor-WMI_ExportsToC++_Use-DiskCleanup-bypass-UAC)/</p>
+
+<p>个人认为寻找绕过UAC的方法可分为以下两个步骤：</p>
+
+<p>1、寻找权限控制不严格的程序</p>
+
+<p>通常具有以下特点：</p>
+
+<ul>
+  <li>以普通用户权限启动程序</li>
+  <li>程序默认以高权限启动，通常标记为Highest</li>
+</ul>
+
+<p>2、该程序启动过程是否可被劫持</p>
+
+<ul>
+  <li>启动路径是否可被劫持</li>
+  <li>启动过程加载的问题（如dll）是否可被劫持</li>
+</ul>
+
+<h2 id="0x03-利用方法">0x03 利用方法</h2>
+<hr>
+
+<p>对应到James Forshaw‏的方法，也是优先寻找权限控制不严格的程序——计划任务中的SilentCleanup</p>
+
+<p><strong>注：</strong></p>
+
+<p>Matt Nelson之前也介绍过一个利用SilentCleanup绕过UAC的方法，目前已被修复，文章地址如下：</p>
+
+<p>https://enigma0x3.net/2016/07/22/bypassing-uac-on-windows-10-using-disk-cleanup/</p>
+
+<p><strong>计划任务中的SilentCleanup：</strong></p>
+
+<ul>
+  <li>普通用户权限即可启动</li>
+  <li>启动后自动提升为高权限</li>
+</ul>
+
+<p>通过Powershell可以获取更多细节,代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$task = Get-ScheduledTask SilentCleanup
+$task.Principal
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>Win7默认powershell版本2.0，不支持Get-ScheduledTask操作</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-21/2-1.png" alt="Alt text"></p>
+
+<p>Authenticated Users表示普通用户权限即可启动</p>
+
+<p>RunLevel为Highest表示以高权限启动</p>
+
+<p>查看启动参数，powershell代码如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">$task.Actions[0]</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-21/2-2.png" alt="Alt text"></p>
+
+<p>启动参数为<code class="language-plaintext highlighter-rouge">%windir%\system32\cleanmgr.exe</code></p>
+
+<p>这里存在一个可供利用的地方——<code class="language-plaintext highlighter-rouge">环境变量%windir%</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>可通过<code class="language-plaintext highlighter-rouge">set windir</code>查看环境变量%windir%</p>
+
+<p>%windir%默认指向c:\Windows</p>
+
+<p>如果修改当前系统环境变量，指向其他路径，那么这里就实现了一个劫持</p>
+
+<p><strong>例如：</strong></p>
+
+<p>将%windir%设置为c:\test</p>
+
+<p>在c:\test\system32\下将payload.exe保存为cleanmgr.exe</p>
+
+<p>那么在启动计划任务SilentCleanup时，就会以高权限启动payload.exe，实现了UAC绕过</p>
+
+<p><strong>更直接的利用方法：</strong></p>
+
+<p>将%windir%设置为<code class="language-plaintext highlighter-rouge">cmd /K</code>，那么在启动计划任务SilentCleanup时会弹出cmd.exe</p>
+
+<p><strong>注:</strong></p>
+
+<p>cmd后面需要加参数，否则由于参数问题导致无法正常启动</p>
+
+<p>/k表示弹出的cmd.exe在执行代码后不退出</p>
+
+<p>为了增加隐蔽性（很多程序在启动时需要调用环境变量%windir%），在执行cmd的需要同时删除新添加的注册表键值<code class="language-plaintext highlighter-rouge">windir</code>，可以使用如下代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg add hkcu\Environment /v windir /d "cmd /K reg delete hkcu\Environment /v windir /f &amp;&amp; REM "
+schtasks /Run /TN \Microsoft\Windows\DiskCleanup\SilentCleanup /I
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>以上代码来自于https://gist.github.com/tyranid/729b334bf9dc0f38184dbd47ae3f52d0#file-disk_cleanup_uac_bypass-bat</p>
+
+<p>将环境变量设置为<code class="language-plaintext highlighter-rouge">cmd /K reg delete hkcu\Environment /v windir /f &amp;&amp; REM</code>，那么在启动计划任务SilentCleanup时会弹出cmd.exe，接着执行删除注册表键值的命令：<code class="language-plaintext highlighter-rouge">reg delete hkcu\Environment /v windir /f</code></p>
+
+<p>完整操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-21/3-1.gif" alt="Alt text"></p>
+
+<p><strong>注:</strong></p>
+
+<p>参数如果换成<code class="language-plaintext highlighter-rouge">/a</code>，那么cmd.exe在执行后面的命令后会立即退出</p>
+
+<h2 id="0x04-防御检测">0x04 防御检测</h2>
+<hr>
+
+<h3 id="1防御">1、防御</h3>
+
+<p>修改计划任务SilentCleanup的启动参数，将环境变量去掉，换成<code class="language-plaintext highlighter-rouge">c:\Windows</code>，锁定路径</p>
+
+<p><strong>管理员权限：</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$action = New-ScheduledTaskAction -Execute $env:windir\System32\cleanmgr.exe -Argument "/autoclean /d $env:systemdrive"
+Set-ScheduledTask SilentCleanup -TaskPath \Microsoft\Windows\DiskCleanup -Action $action
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>以上代码来自于https://gist.github.com/tyranid/9ef39228ba0acc6aa4039d2218006546#file-fix_diskclean_uac_bypass-ps1</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-21/4-1.png" alt="Alt text"></p>
+
+<p>计划任务SilentCleanup的启动参数被修改为<code class="language-plaintext highlighter-rouge">c:\windows\system32\cleanmgr.exe</code>，无法通过修改环境变量%windir%对其劫持</p>
+
+<h3 id="2检测">2、检测</h3>
+
+<p>通过powershell寻找计划任务中是否还存在可供利用的服务，代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$tasks = Get-ScheduledTask | 
+    Where-Object { $_.Principal.RunLevel -ne "Limited" -and 
+                   $_.Principal.LogonType -ne "ServiceAccount" -and 
+                   $_.State -ne "Disabled" -and 
+                   $_.Actions[0].CimClass.CimClassName -eq "MSFT_TaskExecAction" }
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>以上代码来自于https://gist.github.com/tyranid/92e1c7074a9a7b0d5d021e9218e34fe7#file-get_scheduled_tasks-ps1</p>
+
+<p>如下图，可供利用的服务一共有四个，经测试，其他三个无法实际利用，只有SilentCleanup有效</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-21/4-2.png" alt="Alt text"></p>
+
+<h2 id="0x05-补充">0x05 补充</h2>
+<hr>
+
+<p>该方法同样适用于Win8环境，完整操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-21/5-1.gif" alt="Alt text"></p>
+
+<p>Win7系统不包含计划任务SilentCleanup，因此无法利用</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了通过计划任务SilentCleanup绕过UAC的方法，该方法仅需要通过脚本向当前用户注册表写入键值即可，简单有效。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on May 21, 2017
+  </div>
+
+  
+</article>

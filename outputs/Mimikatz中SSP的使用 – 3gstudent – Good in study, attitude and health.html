@@ -1,0 +1,297 @@
+<article class="post">
+  <h1>Mimikatz中SSP的使用</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Mimikatz中的mimilib(ssp)和<code class="language-plaintext highlighter-rouge">misc::memssp</code>同<code class="language-plaintext highlighter-rouge">sekurlsa::wdigest</code>的功能相同，都能够从lsass进程中提取凭据，通常可获得已登录用户的明文口令(Windows Server 2008 R2及更高版本的系统默认无法获得），但实现原理不同，所以绕过高版本限制的方法也不同</p>
+
+<p>我对XPN的第二篇文章进行了学习，对这个技术有了新的认识，于是尝试对这个技术进行总结，添加一些个人的理解</p>
+
+<p>XPN的博客：</p>
+
+<p>https://blog.xpnsec.com/exploring-mimikatz-part-2/</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>SSP简介</li>
+  <li>如何开发SSP</li>
+  <li>如何枚举和删除SSP</li>
+  <li>添加SSP的三种方法</li>
+  <li>memssp修改内存的方法</li>
+</ul>
+
+<h2 id="0x02-ssp简介">0x02 SSP简介</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-R2-and-2012/dn751052(v=ws.11)</p>
+
+<p>SSP，全称Security Support Provider，又名Security Package</p>
+
+<p>SSPI，全称Security Support Provider Interface，是Windows系统在执行认证操作所使用的API</p>
+
+<p>简单的理解为SSPI是SSP的API接口</p>
+
+<p>SSP默认包括以下几种：</p>
+
+<ul>
+  <li>Kerberos Security Support Provider</li>
+  <li>NTLM Security Support Provider</li>
+  <li>Digest Security Support Provider</li>
+  <li>Schannel Security Support Provider</li>
+  <li>Negotiate Security Support Provider</li>
+  <li>Credential Security Support Provider</li>
+  <li>Negotiate Extensions Security Support Provider</li>
+  <li>PKU2U Security Support Provider</li>
+</ul>
+
+<p>用户可以自己开发并添加SSP，能够对系统中某些身份验证和授权事件进行操作</p>
+
+<p>本文只涉及如何添加SSP从lsass进程中提取明文凭据</p>
+
+<h2 id="0x03-如何开发ssp">0x03 如何开发SSP</h2>
+<hr>
+
+<p>SSP是一个dll，不同的功能对应不同的导出函数</p>
+
+<p>mimikatz中的mimilib不仅可以作为SSP，还包含其他功能</p>
+
+<p>实现从lsass进程中提取凭据的导出函数为<code class="language-plaintext highlighter-rouge">SpLsaModeInitialize</code></p>
+
+<p>想要提取出这个功能，可以删除其他导出函数，修改后的mimilib.def内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>LIBRARY
+EXPORTS
+SpLsaModeInitialize		=	kssp_SpLsaModeInitialize
+</code></pre></div></div>
+
+<p>mimilib从lsass进程中提取明文凭据的实现代码：</p>
+
+<p>https://github.com/gentilkiwi/mimikatz/blob/master/mimilib/kssp.c</p>
+
+<p>实现代码中包括以下四个函数：</p>
+
+<ol>
+  <li>
+    <p>SpInitialize
+用于初始化SSP并提供函数指针列表</p>
+  </li>
+  <li>
+    <p>SpShutDown
+被称为卸载SSP</p>
+  </li>
+  <li>
+    <p>SpGetInfo
+提供有关SSP的信息，包括版本，名称和说明
+在枚举SSP(方法在后面会介绍)时会显示这些信息</p>
+  </li>
+  <li>
+    <p>SpAcceptCredentials
+接收LSA传递的明文凭证，由SSP缓存
+mimilib在这里实现了将明文凭证保存在文件<code class="language-plaintext highlighter-rouge">c:\windows\system32\kiwissp.log</code>中</p>
+  </li>
+</ol>
+
+<h2 id="0x04-如何枚举和删除ssp">0x04 如何枚举和删除SSP</h2>
+<hr>
+
+<h3 id="1-枚举ssp">1. 枚举SSP</h3>
+
+<p>测试代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#define SECURITY_WIN32
+
+#include &lt;stdio.h&gt;
+#include &lt;Windows.h&gt;
+#include &lt;Security.h&gt;
+#pragma comment(lib,"Secur32.lib")
+
+int main(int argc, char **argv) {
+	ULONG packageCount = 0;
+	PSecPkgInfoA packages;
+
+	if (EnumerateSecurityPackagesA(&amp;packageCount, &amp;packages) == SEC_E_OK) {
+		for (int i = 0; i &lt; packageCount; i++) {
+			printf("Name: %s\nComment: %s\n\n", packages[i].Name, packages[i].Comment);
+		}
+	}
+}
+</code></pre></div></div>
+
+<p><strong>注:</strong></p>
+
+<p>代码引用自XPN的文章</p>
+
+<p>默认结果如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-6-12/2-1.png" alt="Alt text"></p>
+
+<h3 id="2-删除ssp">2. 删除SSP</h3>
+
+<p>测试代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#define SECURITY_WIN32
+
+#include &lt;stdio.h&gt;
+#include &lt;Windows.h&gt;
+#include &lt;Security.h&gt;
+#pragma comment(lib,"Secur32.lib")
+
+
+int main(int argc, char **argv) {
+
+	SECURITY_STATUS SEC_ENTRYnRet = DeleteSecurityPackageA(argv[1]);
+	printf("DeleteSecurityPackageA return with 0x%X\n", SEC_ENTRYnRet);
+
+}
+</code></pre></div></div>
+
+<p>经测试，无法删除任一SSP，一直都是报错，提示<code class="language-plaintext highlighter-rouge">0x80090302</code></p>
+
+<p>经过搜索发现，找到相同结果的文章：</p>
+
+<p>http://cybernigma.blogspot.com/2014/03/using-sspap-lsass-proxy-to-mitigate.html</p>
+
+<p>猜测微软并没开放这个功能，也就是说，在系统不重启的情况下无法删除SSP</p>
+
+<p><strong>补充：</strong></p>
+
+<p>卸载进程中的dll可使用以下代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/FreeDll.cpp</p>
+
+<h2 id="0x05-添加ssp的三种方法">0x05 添加SSP的三种方法</h2>
+<hr>
+
+<p>这里以mimilib.dll为例</p>
+
+<h3 id="方法1">方法1：</h3>
+
+<p>(1)复制文件</p>
+
+<p>将mimilib.dll复制到<code class="language-plaintext highlighter-rouge">c:\windows\system32</code>下</p>
+
+<p>64位系统要用64位的mimilib.dll，32位系统使用32位的mimilib.dll</p>
+
+<p>(2)修改注册表</p>
+
+<p>位置<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Lsa\</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">Security Packages</code>的值设置为<code class="language-plaintext highlighter-rouge">mimilib.dll</code></p>
+
+<p>(3)等待系统重新启动</p>
+
+<p>系统重新启动后，在<code class="language-plaintext highlighter-rouge">c:\windows\system32</code>生成文件<code class="language-plaintext highlighter-rouge">kiwissp.log</code>，记录当前用户的明文口令</p>
+
+<h3 id="方法2使用api-addsecuritypackage">方法2：使用API AddSecurityPackage</h3>
+
+<p>(1)复制文件</p>
+
+<p>同方法1</p>
+
+<p>(2)修改注册表</p>
+
+<p>同方法1</p>
+
+<p>(3)调用AddSecurityPackage</p>
+
+<p>测试代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#define SECURITY_WIN32
+
+#include &lt;stdio.h&gt;
+#include &lt;Windows.h&gt;
+#include &lt;Security.h&gt;
+#pragma comment(lib,"Secur32.lib")
+
+
+int main(int argc, char **argv) {
+	SECURITY_PACKAGE_OPTIONS option;
+	option.Size = sizeof(option);
+	option.Flags = 0;
+	option.Type = SECPKG_OPTIONS_TYPE_LSA;
+	option.SignatureSize = 0;
+	option.Signature = NULL;
+	SECURITY_STATUS SEC_ENTRYnRet = AddSecurityPackageA("mimilib", &amp;option);
+	printf("AddSecurityPackage return with 0x%X\n", SEC_ENTRYnRet);
+}
+</code></pre></div></div>
+
+<p>添加成功，如果此时输入了新的凭据(例如runas，或者用户锁屏后重新登录)，将会生成文件<code class="language-plaintext highlighter-rouge">kiwissp.log</code></p>
+
+<p>方法2的自动化实现：</p>
+
+<p>https://github.com/EmpireProject/Empire/blob/e37fb2eef8ff8f5a0a689f1589f424906fe13055/data/module_source/persistence/Install-SSP.ps1</p>
+
+<h3 id="方法3使用rpc控制lsass加载ssp">方法3：使用RPC控制lsass加载SSP</h3>
+
+<p>XPN开源的代码：</p>
+
+<p>https://gist.github.com/xpn/c7f6d15bf15750eae3ec349e7ec2380e</p>
+
+<p>我在VS2015下使用，代码需要简单修改一下</p>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-6-12/2-2.png" alt="Alt text"></p>
+
+<p>添加成功</p>
+
+<p>这是一个很棒的方法，有以下优点：</p>
+
+<ul>
+  <li>不需要写注册表</li>
+  <li>不调用API AddSecurityPackage</li>
+  <li>不需要对lsass进程的内存进行写操作</li>
+  <li>lasss进程中不存在加载的dll</li>
+</ul>
+
+<h2 id="0x06-memssp修改内存的方法">0x06 memssp修改内存的方法</h2>
+<hr>
+
+<p>这是mimikatz中的功能，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>misc::memssp
+</code></pre></div></div>
+
+<p>通过修改lsass进程的内存，实现从lsass进程中提取凭据</p>
+
+<p>命令执行后，如果此时输入了新的凭据(例如runas，或者用户锁屏后重新登录)，将会在<code class="language-plaintext highlighter-rouge">c:\windows\system32</code>下生成文件<code class="language-plaintext highlighter-rouge">mimilsa.log</code></p>
+
+<p>XPN以mimikatz的代码为模板，以dll的方式实现了相同的功能，可以通过RPC(0x05中的方法3)或者LoadLibrary进行加载</p>
+
+<p>代码地址：</p>
+
+<p>https://gist.github.com/xpn/93f2b75bf086baf2c388b2ddd50fb5d0</p>
+
+<p>代码适用于<code class="language-plaintext highlighter-rouge">WIN_BUILD_10_1703x64</code>和<code class="language-plaintext highlighter-rouge">WIN_BUILD_10_1809x64</code></p>
+
+<p>其他系统需要修改对应的变量，参考位置：</p>
+
+<p>https://github.com/gentilkiwi/mimikatz/blob/72b83acb297f50758b0ce1de33f722e70f476250/mimikatz/modules/kuhl_m_misc.c#L483</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文结合了XPN的文章，介绍了Mimikatz中的mimilib(ssp)和<code class="language-plaintext highlighter-rouge">misc::memssp</code>从lsass进程中提取凭据的方法，整理了相关技巧，包括开发、添加、枚举SSP和内存patch</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on June 12, 2019
+  </div>
+
+  
+</article>

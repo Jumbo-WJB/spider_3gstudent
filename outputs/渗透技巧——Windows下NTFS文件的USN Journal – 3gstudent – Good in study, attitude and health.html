@@ -1,0 +1,237 @@
+<article class="post">
+  <h1>渗透技巧——Windows下NTFS文件的USN Journal</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Windows%E4%B8%8BNTFS%E6%96%87%E4%BB%B6%E7%9A%84%E6%97%B6%E9%97%B4%E5%B1%9E%E6%80%A7/">《渗透技巧——Windows下NTFS文件的时间属性》</a>介绍了修改NTFS文件时间属性的方法和细节，以及取证上的建议。
+本文将要继续研究NTFS文件另一处记录文件修改时间的位置——USN Journal，同样是分析利用思路，给出取证上的建议。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>基本概念</li>
+  <li>读取USN Journal的方法</li>
+  <li>利用思路</li>
+  <li>取证建议</li>
+</ul>
+
+<h2 id="0x02-usn-journal的基本概念">0x02 USN Journal的基本概念</h2>
+<hr>
+
+<p>官方文档：</p>
+
+<p>https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-2000-server/bb742450(v=technet.10)</p>
+
+<p>USN Journal (Update Sequence Number Journal)，也称作Change Journal，用来记录NTFS volume中文件修改的信息，能够提高搜索文件的效率</p>
+
+<p>每个NTFS volume对应一个USN Journal，存储在<code class="language-plaintext highlighter-rouge">NTFS metafile</code>的<code class="language-plaintext highlighter-rouge">$Extend\$UsnJrnl</code>中，也就是说，不同的NTFS volume对应的USN Journal不同</p>
+
+<p>USN Journal会记录文件和目录的创建、删除、修改、重命名和加解密操作，每条记录的格式如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>typedef struct {
+  DWORD         RecordLength;
+  WORD          MajorVersion;
+  WORD          MinorVersion;
+  DWORDLONG     FileReferenceNumber;
+  DWORDLONG     ParentFileReferenceNumber;
+  USN           Usn;
+  LARGE_INTEGER TimeStamp;
+  DWORD         Reason;
+  DWORD         SourceInfo;
+  DWORD         SecurityId;
+  DWORD         FileAttributes;
+  WORD          FileNameLength;
+  WORD          FileNameOffset;
+  WCHAR         FileName[1];
+} USN_RECORD_V2, *PUSN_RECORD_V2;
+</code></pre></div></div>
+
+<p>官方资料：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/desktop/api/winioctl/ns-winioctl-usn_record_v2</p>
+
+<p>在<code class="language-plaintext highlighter-rouge">NTFS metafile</code>的<code class="language-plaintext highlighter-rouge">$Extend\$UsnJrnl\$Max</code>保存USN Journal文件的总大小，如果USN Journal的记录长度超出总大小，会从最初始的记录开始覆盖</p>
+
+<h2 id="0x03-读取usn-journal的方法">0x03 读取USN Journal的方法</h2>
+<hr>
+
+<h3 id="1使用命令fsutil-usn">1、使用命令fsutil usn</h3>
+
+<p>官方文档：</p>
+
+<p>https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2008-R2-and-2008/cc788042(v%3dws.10)</p>
+
+<h4 id="1查看c盘的usn-journal信息">(1)查看C盘的USN Journal信息</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>fsutil usn queryjournal c:
+</code></pre></div></div>
+
+<p>包括以下信息：</p>
+
+<ul>
+  <li>Usn Journal ID</li>
+  <li>First Usn</li>
+  <li>Next Usn</li>
+  <li>Lowest Valid Usn</li>
+  <li>Max Usn</li>
+  <li>Maximum Size</li>
+  <li>Allocation Delta</li>
+</ul>
+
+<h4 id="2查看c盘所有的usn-journal">(2)查看C盘所有的USN Journal</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>fsutil usn enumdata 1 0 1 c:
+</code></pre></div></div>
+
+<p>包括以下信息：</p>
+
+<ul>
+  <li>File Ref#</li>
+  <li>ParentFile Ref#</li>
+  <li>Usn</li>
+  <li>SecurityId</li>
+  <li>Reason</li>
+  <li>Name</li>
+</ul>
+
+<p>输出结果不够详细</p>
+
+<h3 id="2使用开源工具">2、使用开源工具</h3>
+
+<h4 id="1导出usn-journal">(1)导出USN Journal</h4>
+
+<p>下载地址：</p>
+
+<p>https://github.com/jschicht/ExtractUsnJrnl</p>
+
+<p>参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ExtractUsnJrnl /DevicePath:c: /OutputPath:c:\test /OutputName:UsnJrnl_vol1.bin
+</code></pre></div></div>
+
+<h4 id="2将usn-journal转为csv格式输出">(2)将USN Journal转为CSV格式输出</h4>
+
+<p>下载地址：</p>
+
+<p>https://github.com/jschicht/UsnJrnl2Csv</p>
+
+<p>参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>UsnJrnl2Csv /UsnJrnlFile:c:\test\UsnJrnl_vol1.bin /OutputPath:c:\test
+</code></pre></div></div>
+
+<p>包括以下信息：</p>
+
+<ul>
+  <li>Offset</li>
+  <li>FileName</li>
+  <li>USN</li>
+  <li>Timestamp</li>
+  <li>Reason</li>
+  <li>MFTReference</li>
+  <li>MFTReferenceSeqNo</li>
+  <li>MFTParentReference</li>
+  <li>MFTParentReferenceSeqNo</li>
+  <li>FileAttributes</li>
+  <li>MajorVersion</li>
+  <li>MinorVersion</li>
+  <li>SourceInfo</li>
+  <li>SecurityId</li>
+</ul>
+
+<p>输出结果很完整</p>
+
+<h3 id="3c实现">3、c++实现</h3>
+
+<p>我这里写了一个简单的示例代码，下载地址：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/EnumUsnJournal.cpp</p>
+
+<p>代码实现了枚举C盘的USN Journal，仅输出文件名</p>
+
+<h2 id="0x04-利用思路">0x04 利用思路</h2>
+<hr>
+
+<h3 id="1清除所有usn-journal">1、清除所有USN Journal</h3>
+
+<h4 id="1使用fsutil">(1)使用fsutil</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>fsutil usn deletejournal /d c:
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>我在测试环境下没有删除成功</p>
+
+<h4 id="2api">(2)API</h4>
+
+<p>https://docs.microsoft.com/en-us/windows/desktop/api/winioctl/ns-winioctl-delete_usn_journal_data</p>
+
+<p><strong>注：</strong></p>
+
+<p>我在测试环境下没有删除成功</p>
+
+<h3 id="2清除单条usn-journal">2、清除单条USN Journal</h3>
+
+<p>我还没有找到可用的API接口</p>
+
+<p>唯一的方法是直接修改NTFS文件，但是自nt6.x开始，Windows禁止加载未经签名的驱动文件</p>
+
+<p>这里可以尝试使用付费版的WinHex对NTFS文件进行操作，修改<code class="language-plaintext highlighter-rouge">$Extend\$UsnJrnl</code>中的内容</p>
+
+<p>也可以尝试绕过驱动保护</p>
+
+<p>$UsnJrnl的内容可参考：</p>
+
+<p>http://forensicinsight.org/wp-content/uploads/2013/07/F-INSIGHT-Advanced-UsnJrnl-Forensics-English.pdf</p>
+
+<p>按照格式读取USN Journal，删除指定USN Journal，再写入磁盘</p>
+
+<h3 id="3暴力覆盖">3、暴力覆盖</h3>
+
+<p>首先查看磁盘USN Journal文件的总长度</p>
+
+<p>然后通过创建、删除、修改、重命名等操作生成USN Journal的记录，当超过总长度后会覆盖最初始的记录，直至覆盖所有的USN Journal</p>
+
+<h2 id="0x05-取证建议">0x05 取证建议</h2>
+<hr>
+
+<h4 id="1读取usn-journal列出所有记录查找是否存在可疑记录">1、读取USN Journal，列出所有记录，查找是否存在可疑记录</h4>
+
+<p>该方法并非完全可信，攻击者只要能够绕过驱动保护，就能修改USN Journal</p>
+
+<h4 id="2尝试其他方法">2、尝试其他方法</h4>
+
+<p>比如从内存中读取$MFT records</p>
+
+<p>https://github.com/jschicht/HexDump</p>
+
+<p>https://github.com/jschicht/MftCarver</p>
+
+<p>Joakim Schicht的github有很多取证的工具值得参考:</p>
+
+<p>https://github.com/jschicht/</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了NTFS文件的USN Journal的利用思路，给出取证上的建议。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on January  4, 2019
+  </div>
+
+  
+</article>

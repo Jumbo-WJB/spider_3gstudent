@@ -1,0 +1,177 @@
+<article class="post">
+  <h1>Use msdtc to maintain persistence</h1>
+
+  <div class="entry">
+    <hr>
+
+<h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Shadow Force曾经在域环境中使用过的一个后门，利用MSDTC服务加载dll，实现自启动，并绕过Autoruns对启动项的检测。本文将要对其进行测试，介绍更多利用技巧，分析防御方法。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>MSDTC简介</li>
+  <li>后门思路</li>
+  <li>后门验证</li>
+  <li>更多测试和利用方法</li>
+  <li>检测防御</li>
+</ul>
+
+<h2 id="0x02-msdtc简介">0x02 MSDTC简介</h2>
+<hr>
+
+<h3 id="msdtc">MSDTC：</h3>
+
+<ul>
+  <li>
+    <p>对应服务MSDTC，全称<code class="language-plaintext highlighter-rouge">Distributed Transaction Coordinator</code>，Windows系统默认启动该服务</p>
+  </li>
+  <li>
+    <p>对应进程msdtc.exe,位于%windir%\system32\</p>
+  </li>
+  <li>
+    <p>msdtc.exe是微软分布式传输协调程序，该进程调用系统Microsoft Personal Web Server和Microsoft SQL Server</p>
+  </li>
+</ul>
+
+<h2 id="0x03-后门思路">0x03 后门思路</h2>
+<hr>
+
+<p><strong>参考链接：</strong></p>
+
+<p>http://blog.trendmicro.com/trendlabs-security-intelligence/shadow-force-uses-dll-hijacking-targets-south-korean-company/</p>
+
+<p>文中介绍的思路如下：</p>
+
+<p>当计算机加入域中，MSDTC服务启动时，会搜索注册表<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\MSDTC\MTxOCI</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-31/2-1.png" alt="Alt text"></p>
+
+<p>分别加载3个dll：<code class="language-plaintext highlighter-rouge">oci.dll</code>,<code class="language-plaintext highlighter-rouge">SQLLib80.dll</code>,<code class="language-plaintext highlighter-rouge">xa80.dll</code></p>
+
+<p>然而特别的是，<strong>Windows系统默认不包含oci.dll</strong></p>
+
+<p>也就是说，将payload.dll重名为oci.dll并保存在<code class="language-plaintext highlighter-rouge">%windir%\system32\</code>下</p>
+
+<p>域中的计算机启动服务MSDTC时就会加载该dll，实现代码执行</p>
+
+<h2 id="0x04-后门验证">0x04 后门验证</h2>
+<hr>
+
+<p>测试系统： Win7 x64</p>
+
+<p>搭建域环境，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-31/2-2.png" alt="Alt text"></p>
+
+<p>使用Procmon监控msdtc的启动过程，筛选进程msdtc.exe，查看文件操作，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-31/2-3.png" alt="Alt text"></p>
+
+<p>msdtc.exe确实会尝试加载oci.dll，并且由于系统默认不存在oci.dll,导致加载失败</p>
+
+<p>使用64位的测试dll,下载地址如下：</p>
+
+<p>https://github.com/3gstudent/test/blob/master/calc_x64.dll</p>
+
+<p>将其保存在<code class="language-plaintext highlighter-rouge">%windir%\system32\</code>下</p>
+
+<p>结束进程msdtc.exe，命令行参数如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">taskkill /f /im msdtc.exe</code></p>
+
+<p>等待msdtc.exe重新启动</p>
+
+<p>等待一段时间，mstdc.exe重新启动,成功加载oci.dll，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-31/2-4.png" alt="Alt text"></p>
+
+<p>calc.exe以system权限启动</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-31/2-5.png" alt="Alt text"></p>
+
+<p>经实际测试，该方法偶尔会出现bug，通过taskkill结束进程后，msdtc.exe并不会重新启动</p>
+
+<p><strong>解决方法：</strong></p>
+
+<p>重新启动服务MSDTC就好，命令行参数如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">net start msdtc</code></p>
+
+<h2 id="0x05-更多测试">0x05 更多测试</h2>
+<hr>
+
+<h3 id="1测试32位系统">1、测试32位系统</h3>
+
+<p>32位系统换用32位dll就好，下载地址如下：</p>
+
+<p>https://github.com/3gstudent/test/blob/master/calc.dll</p>
+
+<h3 id="2测试64位系统">2、测试64位系统</h3>
+
+<p>64位系统，虽然SysWOW64文件夹下也包含32位的msdtc.exe，但是MSDTC服务只启动64位的msdtc.exe</p>
+
+<p>因此，不支持32位oci.dll的加载</p>
+
+<h3 id="3通用测试">3、通用测试</h3>
+
+<p>经实际测试，MSDTC服务不是域环境特有，工作组环境下默认也会启动MSDTC服务</p>
+
+<p>也就是说，该利用方法不仅适用于域环境，工作组环境也同样适用</p>
+
+<h3 id="4以管理员权限加载ocidll降权启动">4、以管理员权限加载oci.dll（降权启动）</h3>
+
+<p>上述方法会以system权限加载oci.dll，提供一个以管理员权限加载oci.dll（降权启动）的方法：</p>
+
+<p>管理员权限cmd执行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">msdtc -install</code></p>
+
+<p>启动的calc.exe为high权限，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-31/3-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>关于为什么要降权及降权的更多实现方式可参照文章</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E7%A8%8B%E5%BA%8F%E7%9A%84%E9%99%8D%E6%9D%83%E5%90%AF%E5%8A%A8/">《渗透技巧——程序的降权启动》</a></p>
+
+<h2 id="0x06-检测防御">0x06 检测防御</h2>
+<hr>
+
+<h3 id="检测">检测：</h3>
+
+<p>检测%windir%\system32\是否包含可疑oci.dll</p>
+
+<h3 id="防御">防御：</h3>
+
+<p>对于普通用户主机，建议禁用服务MSDTC</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了MSDTC的相关利用技巧，不仅能用作后门，同样可用于程序的降权启动。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on July 31, 2017
+  </div>
+
+  
+</article>

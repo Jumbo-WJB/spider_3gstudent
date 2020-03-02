@@ -1,0 +1,283 @@
+<article class="post">
+  <h1>Windows Event Viewer Log (EVT)单条日志清除（一）——删除思路与实例</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Windows Event Viewer Log (EVT)单条日志清除系列文章的第一篇，侧重于介绍evt日志文件的基础知识和删除单条日志的实现思路与实例</p>
+
+<p>Windows Event Viewer Log (EVT)适用于以下Windows系统:</p>
+
+<ul>
+  <li>Windows NT 4</li>
+  <li>Windows 2000</li>
+  <li>Windows XP</li>
+  <li>Windows 2003</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>之前介绍了Windows XML Event Log (EVTX)适用于Win7及更高版本的系统</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>evt文件格式</li>
+  <li>删除单条日志的思路</li>
+  <li>删除单条日志的实例</li>
+</ul>
+
+<h2 id="0x02-基础知识">0x02 基础知识</h2>
+<hr>
+
+<p>evt文件格式指Windows Vista之前用于保存系统日志信息的文件，最常见的为XP和Server2003系统</p>
+
+<p>日志文件默认保存位置： <code class="language-plaintext highlighter-rouge">%systemroot%\system32\config</code></p>
+
+<p>常见日志文件：</p>
+
+<ul>
+  <li>应用程序日志：AppEvent.Evt</li>
+  <li>安全日志：SecEvent.Evt</li>
+  <li>系统日志：SysEvent.Evt</li>
+</ul>
+
+<h3 id="查看日志的方法">查看日志的方法</h3>
+
+<h4 id="1-通过界面">(1) 通过界面</h4>
+
+<p><code class="language-plaintext highlighter-rouge">cmd</code> -&gt; <code class="language-plaintext highlighter-rouge">eventvwr</code></p>
+
+<h4 id="2-通过命令行">(2) 通过命令行</h4>
+
+<p>查询系统日志并输出详细信息：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cscript c:\windows\system32\eventquery.vbs /l system /v
+</code></pre></div></div>
+
+<p>查询指定时间(2017.12.05,01:00:00AM至2018.01.02,10:00:00AM)之间的系统日志：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cscript c:\windows\system32\eventquery.vbs /l system /fi "Datetime eq 12/05/2017,01:00:00AM-01/02/2018,10:00:00AM"
+</code></pre></div></div>
+
+<p>官方参数说明：</p>
+
+<p>https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-xp/bb490900(v=technet.10)</p>
+
+<h3 id="evt文件格式">evt文件格式</h3>
+
+<p>参考资料：</p>
+
+<p>https://github.com/libyal/libevt/blob/master/documentation/Windows%20Event%20Log%20(EVT)%20format.asciidoc</p>
+
+<p>evt文件结构包含三部分：</p>
+
+<ul>
+  <li>file header</li>
+  <li>event records</li>
+  <li>end of file record</li>
+  <li>trailing empty values</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>file header保存evtx文件基本信息，值得注意的是<code class="language-plaintext highlighter-rouge">End of file record offset</code>，<code class="language-plaintext highlighter-rouge">Last (newest) record number</code>和<code class="language-plaintext highlighter-rouge">Maximum file size</code></p>
+
+<p>event records对应每条日志的内容，值得注意的是<code class="language-plaintext highlighter-rouge">Record number</code></p>
+
+<p>end of file record固定结构，值得注意的是<code class="language-plaintext highlighter-rouge">End of file record offset</code>和<code class="language-plaintext highlighter-rouge">Last (newest) record number</code></p>
+
+<p>trailing empty values为尾随空值，用于填充文件长度，内容任意，不会影响evtx文件的有效性</p>
+
+<h4 id="1-file-header">(1) file header</h4>
+
+<p>格式可参考：</p>
+
+<p>https://github.com/libyal/libevt/blob/master/documentation/Windows%20Event%20Log%20(EVT)%20format.asciidoc#2-file-header</p>
+
+<p>前48位，没有校验和标志位</p>
+
+<p>以下五项需要配置正确：</p>
+
+<ul>
+  <li>First (oldest) record offset</li>
+  <li>End of file record offset</li>
+  <li>Last (newest) record number</li>
+  <li>First (oldest) record number</li>
+  <li>Maximum file size</li>
+</ul>
+
+<h4 id="2-event-records">(2) event records</h4>
+
+<p>格式可参考：</p>
+
+<p>https://github.com/libyal/libevt/blob/master/documentation/Windows%20Event%20Log%20(EVT)%20format.asciidoc#3-event-record</p>
+
+<p>修改Record number(即使重复)不影响日志文件的正常识别</p>
+
+<h4 id="3-end-of-file-record">(3) end of file record</h4>
+
+<p>格式可参考：</p>
+
+<p>https://github.com/libyal/libevt/blob/master/documentation/Windows%20Event%20Log%20(EVT)%20format.asciidoc#4-end-of-file-record</p>
+
+<p>同file header，以下四项需要配置正确：</p>
+
+<ul>
+  <li>First (oldest) record offset</li>
+  <li>End of file record offset</li>
+  <li>Last (newest) record number</li>
+  <li>First (oldest) record number</li>
+</ul>
+
+<h2 id="0x03-删除思路">0x03 删除思路</h2>
+<hr>
+
+<p>由于evt文件不存在校验值，所以我们在删除单条日志时可以使用以下流程：</p>
+
+<ul>
+  <li>直接删除某条日志的内容</li>
+  <li>后面日志更新Record number(减1)</li>
+  <li>更新file header中的五项</li>
+  <li>同步更新end of file record中的四项</li>
+</ul>
+
+<h2 id="0x04-删除实例">0x04 删除实例</h2>
+<hr>
+
+<p>查看日志：</p>
+
+<p><code class="language-plaintext highlighter-rouge">cmd</code> -&gt; <code class="language-plaintext highlighter-rouge">eventvwr</code></p>
+
+<p>获得system项下共有9条日志，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-7-5/2-1.png" alt="Alt text"></p>
+
+<p>选中<code class="language-plaintext highlighter-rouge">System</code>，右键，选择<code class="language-plaintext highlighter-rouge">Save Log File As...</code>，将日志文件保存为sys1.evt</p>
+
+<p><strong>注：</strong></p>
+
+<p>复制<code class="language-plaintext highlighter-rouge">%systemroot%\system32\config</code>下的文件SysEvent.Evt，得到的日志文件无法正常打开</p>
+
+<p>原因：</p>
+
+<p><code class="language-plaintext highlighter-rouge">%systemroot%\system32\config</code>下evt文件的file header未同步更新，导致打开evt文件时格式出现错误</p>
+
+<p>修复file header后，文件能够正常打开</p>
+
+<p>sys1.evt已上传，下载地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evt–General/blob/master/sys1.evt</p>
+
+<p>在eventvwr中打开该日志，Log Type选择<code class="language-plaintext highlighter-rouge">System</code>,成功打开</p>
+
+<p>文件包含9条日志，下面尝试删除第5条日志，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-7-5/2-2.png" alt="Alt text"></p>
+
+<h3 id="1定位第5条日志">1、定位第5条日志</h3>
+
+<p>搜索<code class="language-plaintext highlighter-rouge">4c664c6505000000</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">4c664c65</code>为ELF_LOG_SIGNATURE，固定结构</p>
+
+<p><code class="language-plaintext highlighter-rouge">05000000</code>为Record number</p>
+
+<h3 id="2删除第5条日志">2、删除第5条日志</h3>
+
+<p>起始位置为<code class="language-plaintext highlighter-rouge">4c664c6505000000</code>的之前的4字节</p>
+
+<p>删除长度为<code class="language-plaintext highlighter-rouge">4c664c6505000000</code>的之前的4字节</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-7-5/3-1.png" alt="Alt text"></p>
+
+<p>起始位置为<code class="language-plaintext highlighter-rouge">0x320h</code></p>
+
+<p>删除长度为<code class="language-plaintext highlighter-rouge">0x00000070h</code>(即<code class="language-plaintext highlighter-rouge">112</code>)</p>
+
+<p><strong>补充：</strong></p>
+
+<p>通过UltraEdit实现的操作：</p>
+
+<p>选中起始位置为<code class="language-plaintext highlighter-rouge">0x320h</code>，右键，选择<code class="language-plaintext highlighter-rouge">十六进制插入/删除</code></p>
+
+<p>选择<code class="language-plaintext highlighter-rouge">删除</code>，填入删除字节数<code class="language-plaintext highlighter-rouge">112</code></p>
+
+<h3 id="3后面日志更新record-number减1">3、后面日志更新Record number(减1)</h3>
+
+<p>即第6、7、8和9条日志的Record number</p>
+
+<h3 id="4更新file-header中的三项">4、更新file header中的三项</h3>
+
+<h4 id="1-end-of-file-record-offset">(1) End of file record offset</h4>
+
+<p>位于File header偏移20的4字节</p>
+
+<p>保存的内容为end of file record的起始地址</p>
+
+<p>两种计算方法：</p>
+
+<ol>
+  <li>原偏移地址-第5条日志的长度(112)</li>
+  <li>定位end of file record，直接获得</li>
+</ol>
+
+<p>新的End of file record offset为<code class="language-plaintext highlighter-rouge">0x00000640h</code></p>
+
+<h4 id="2-last-newest-record-number">(2) Last (newest) record number</h4>
+
+<p>位于File header偏移24的4字节</p>
+
+<p>数值减1，由<code class="language-plaintext highlighter-rouge">0x0000000A</code>变为<code class="language-plaintext highlighter-rouge">0x00000009</code></p>
+
+<h4 id="3-maximum-file-size">(3) Maximum file size</h4>
+
+<p>位于File header偏移32的4字节</p>
+
+<p>新的Maximum file size为<code class="language-plaintext highlighter-rouge">0x00000668h</code></p>
+
+<h3 id="5同步更新end-of-file-record中的两项">5、同步更新end of file record中的两项</h3>
+
+<ul>
+  <li>End of file record offset</li>
+  <li>Last (newest) record number</li>
+</ul>
+
+<p>修改后保存为新文件sys2.evt</p>
+
+<p>下载地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evt–General/blob/master/sys2.evt</p>
+
+<p>成功删除第5条日志</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-7-5/3-2.png" alt="Alt text"></p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文介绍了evt日志文件的基础知识和删除单条日志的实现思路，实例演示如何修改evt文件，隐藏其中一条日志</p>
+
+<p>下一篇将要按照之前的研究思路，介绍如何编写程序实现自动删除指定日期的日志</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on July  5, 2018
+  </div>
+
+  
+</article>

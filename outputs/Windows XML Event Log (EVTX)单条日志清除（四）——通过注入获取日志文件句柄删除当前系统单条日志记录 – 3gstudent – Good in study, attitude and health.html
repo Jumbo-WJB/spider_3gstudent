@@ -1,0 +1,303 @@
+<article class="post">
+  <h1>Windows XML Event Log (EVTX)单条日志清除（四）——通过注入获取日志文件句柄删除当前系统单条日志记录</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Windows XML Event Log (EVTX)单条日志清除系列文章的第四篇，介绍第二种删除当前系统单条日志记录的方法：获得日志服务Eventlog对应进程中指定日志文件的句柄，通过Dll注入获得该句柄的操作权限，利用该句柄实现日志文件的修改</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>利用思路</li>
+  <li>程序实现</li>
+  <li>枚举日志服务Eventlog对应进程的所有句柄，获得指定日志文件的句柄</li>
+  <li>通过Dll注入获得该句柄的操作权限</li>
+  <li>进程间消息传递的方法</li>
+</ul>
+
+<h2 id="0x02-利用思路">0x02 利用思路</h2>
+<hr>
+
+<p>系统启动日志服务Eventlog后，会以独占模式打开日志文件，导致其他进程无法打开该日志文件，也就无法进行修改操作</p>
+
+<p>那么，如果我们通过Dll注入进入进程的内存，接着获得指定日志文件的句柄，能否获得该日志文件的操作权限呢？</p>
+
+<h2 id="0x03-枚举日志服务eventlog对应进程的所有句柄获得指定日志文件的句柄">0x03 枚举日志服务Eventlog对应进程的所有句柄，获得指定日志文件的句柄</h2>
+<hr>
+
+<h3 id="1利用工具processhacker获得指定日志文件的句柄">1、利用工具processhacker获得指定日志文件的句柄</h3>
+
+<p>下载地址：</p>
+
+<p>https://processhacker.sourceforge.io/</p>
+
+<h4 id="1获得日志服务eventlog对应进程的pid">(1)获得日志服务Eventlog对应进程的pid</h4>
+
+<p>执行如下powershell代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-WmiObject -Class win32_service -Filter "name = 'eventlog'" | select -exp ProcessId
+</code></pre></div></div>
+
+<h4 id="2运行processhacker">(2)运行processhacker</h4>
+
+<p>根据pid找到进程，查看<code class="language-plaintext highlighter-rouge">Properties</code>-&gt;<code class="language-plaintext highlighter-rouge">Handles</code></p>
+
+<p>能够获得当前进程的所有句柄信息</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-19/2-1.png" alt="Alt text"></p>
+
+<p>可以看到<code class="language-plaintext highlighter-rouge">C:\Windows\System32\winevt\Logs\Security.evtx</code>对应的Handle值为<code class="language-plaintext highlighter-rouge">0x1c8</code></p>
+
+<h3 id="2通过c程序实现获得指定日志文件的句柄">2、通过c++程序实现获得指定日志文件的句柄</h3>
+
+<p>查看processhacker的源码，寻找实现方法</p>
+
+<p>代码位置：</p>
+
+<p>https://github.com/processhacker/processhacker/blob/e2d793289dede80f6e3bda26d6478dc58b20b7f8/ProcessHacker/hndlprv.c#L307</p>
+
+<p>获得参考资料：</p>
+
+<blockquote>
+  <ul>
+    <li>On Windows 8 and later, NtQueryInformationProcess with ProcessHandleInformation is the most efficient method.</li>
+    <li>On Windows XP and later, NtQuerySystemInformation with SystemExtendedHandleInformation.</li>
+    <li>Otherwise, NtQuerySystemInformation with SystemHandleInformation can be used.</li>
+  </ul>
+</blockquote>
+
+<p>于是，挑选第三个方法尝试实现</p>
+
+<p><strong>注：</strong></p>
+
+<p>经测试，第三个方法适用于Win7和更新版本的操作系统</p>
+
+<p>利用NtQuerySystemInformation查询SystemHandleInformation能够获得所有进程的句柄信息</p>
+
+<p>挑选出日志进程中的所有句柄</p>
+
+<p>接着通过NtDuplicateObject获取句柄的名称和具体的数值信息</p>
+
+<p>最后筛选出想要查找的句柄，输出Handle值</p>
+
+<p>完整实现代码已开源，下载地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/GetPIDandHandle(evtx).cpp</p>
+
+<p>代码实现了根据输入的关键词进行搜索，获得对应的句柄名称和Handle值</p>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-19/2-2.png" alt="Alt text"></p>
+
+<p>成功获得日志服务Eventlog对应进程的pid，security.evtx对应的Handle值为<code class="language-plaintext highlighter-rouge">0x1c8</code></p>
+
+<h2 id="0x04-通过dll注入获得该句柄的操作权限">0x04 通过Dll注入获得该句柄的操作权限</h2>
+<hr>
+
+<p>通过NtCreateThreadEx + LdrLoadDll实现Dll注入的代码可参考：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/NtCreateThreadEx%20%2B%20LdrLoadDll.cpp</p>
+
+<p><strong>注:</strong></p>
+
+<p>注入成功后需要FreeDll</p>
+
+<p>注入成功后，使用获得到的Handle值作为函数CreateFileMapping()的第一个参数，创建一个文件映射内核对象</p>
+
+<p>然后调用函数MapViewOfFile()将文件数据映射到进程的地址空间</p>
+
+<p>接下来修改内存中的数据，删除单条日志记录</p>
+
+<p>最后调用函数FlushViewOfFile()，将内存数据写入磁盘</p>
+
+<h2 id="0x05-进程间消息传递的方法">0x05 进程间消息传递的方法</h2>
+<hr>
+
+<p>在实际使用过程中，整个实现日志记录删除功能的代码要放在Dll中，而通过CreateRemoteThread无法向Dll传入参数，这就导致无法删除指定EventlogRecordId的日志</p>
+
+<p>这里可以借助进程间的消息传递</p>
+
+<p>实现方法有多种，例如信号、管道、消息队列和共享内存，甚至是读写文件</p>
+
+<p>由于在<strong>0x04</strong>部分使用了函数CreateFileMapping()创建一个文件映射内核对象，所以进程间消息传递也使用内存映射的方式</p>
+
+<p>创建一个共享内存，代码可参考：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/OpenFileMapping.cpp</p>
+
+<p>代码中创建了两个内存映射对象，并且指定了函数CreateFileMapping()的访问权限为允许任何人访问该对象，即函数CreateFileMapping()的第二个参数</p>
+
+<p>通常情况下，该值设置为NULL，表示默认访问权限，但在注入的Dll中必须设置为允许任何人访问该对象，否则提示拒绝访问</p>
+
+<p><strong>原因如下：</strong></p>
+
+<p>Dll注入svchost.exe后，权限为System，默认访问权限无法访问由用户创建的内存映射文件对象，必须指定为允许任何人访问该对象</p>
+
+<p>当然，如果是两个用户权限的进程进行消息传递，函数CreateFileMapping()的第二个参数为NULL即可</p>
+
+<p>读取指定共享内存，代码可参考：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/OpenFileMapping.cpp</p>
+
+<p>代码中读取这两个内存映射对象，添加了数据类型转换的功能(字符串转int)</p>
+
+<h2 id="0x06-程序实现流程">0x06 程序实现流程</h2>
+<hr>
+
+<h3 id="1自己解析格式实现日志删除">1、自己解析格式，实现日志删除</h3>
+
+<p>删除的关键代码如下：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/DeleteRecordofFile.cpp</p>
+
+<p>代码实现了删除文件<code class="language-plaintext highlighter-rouge">c:\test\Setup.evtx</code>中的一条日志(EventRecordID=14)，新文件保存为<code class="language-plaintext highlighter-rouge">c:\test\SetupNew.evtx</code></p>
+
+<p>整个实现流程分成两部分：</p>
+
+<ul>
+  <li>启动程序</li>
+  <li>注入的Dll</li>
+</ul>
+
+<h4 id="1启动程序loader-rewritingcpp">1.启动程序(Loader-rewriting.cpp)</h4>
+
+<p>代码地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/Loader-rewriting.cpp</p>
+
+<p>流程如下：</p>
+
+<ol>
+  <li>获得日志服务Eventlog对应进程的pid</li>
+  <li>枚举日志服务Eventlog对应进程的的所有句柄，获得指定日志文件的句柄</li>
+  <li>创建两个内存映射，用于向dll传递日志文件的句柄和需要删除日志的EventRecordID</li>
+  <li>向日志服务Eventlog对应的进程注入Dll</li>
+  <li>释放Dll</li>
+  <li>关闭内存映射</li>
+</ol>
+
+<h4 id="2注入的dlldll-rewritingcpp">2.注入的Dll(Dll-rewriting.cpp)</h4>
+
+<p>代码地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/Dll-rewriting.cpp</p>
+
+<p>流程如下：</p>
+
+<ol>
+  <li>分别从两个内存映射读取消息，将读取到的内容从字符串转换成int类型，获得日志文件的句柄及需要删除日志的EventRecordID</li>
+  <li>调用函数CreateFileMapping()，传入日志文件的句柄，创建一个文件映射内核对象</li>
+  <li>调用函数MapViewOfFile()将文件数据映射到进程的地址空间</li>
+  <li>修改内存数据，删除指定日志</li>
+  <li>调用函数FlushViewOfFile()，将内存数据写入磁盘</li>
+  <li>关闭日志文件的内存映射</li>
+</ol>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-19/3-1.png" alt="Alt text"></p>
+
+<h3 id="2使用winapi-evtexportlog过滤出想要删除的内容">2、使用WinAPI EvtExportLog，过滤出想要删除的内容</h3>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/360-A-Team/EventCleaner/blob/master/EventCleaner/EventCleaner.cpp#L528</p>
+
+<p>我按照这个思路写的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/DeleteRecordofFileEx.cpp</p>
+
+<p>代码实现了调用Windows API EvtExportLog对日志文件进行筛选，去除指定日志后，将剩下的日志内容保存为新文件temp.evtx</p>
+
+<p>整个实现流程分成三部分：</p>
+
+<ul>
+  <li>日志删除程序</li>
+  <li>启动程序</li>
+  <li>注入的Dll</li>
+</ul>
+
+<h4 id="1日志删除程序deleterecord-evtexportlogcpp">1.日志删除程序(DeleteRecord-EvtExportLog.cpp)</h4>
+
+<p>代码地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/DeleteRecord-EvtExportLog.cpp</p>
+
+<p>流程如下：</p>
+
+<ol>
+  <li>指定日志文件和需要删除日志的EventRecordID</li>
+  <li>生成新的日志文件temp.evtx</li>
+</ol>
+
+<h4 id="2启动程序loader-evtexportlogcpp">2.启动程序(Loader-EvtExportLog.cpp)</h4>
+
+<p>代码地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/Loader-EvtExportLog.cpp</p>
+
+<p>流程如下：</p>
+
+<ol>
+  <li>获得日志服务Eventlog对应进程的pid</li>
+  <li>枚举日志服务Eventlog对应进程的的所有句柄，获得指定日志文件的句柄</li>
+  <li>创建三个内存映射，用于向dll传递日志文件的句柄、新日志文件的长度和新日志文件的内容</li>
+  <li>向日志服务Eventlog对应的进程注入Dll</li>
+  <li>释放Dll</li>
+  <li>关闭内存映射</li>
+</ol>
+
+<h4 id="3注入的dlldll-evtexportlogcpp">3.注入的Dll(Dll-EvtExportLog.cpp)</h4>
+
+<p>代码地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/Dll-EvtExportLog.cpp</p>
+
+<p>流程如下：</p>
+
+<ol>
+  <li>从第一个内存映射获得日志文件的句柄，将读取到的内容从字符串转换成int类型</li>
+  <li>从第二个内存映射获得新日志文件的长度</li>
+  <li>根据新日志文件的长度调整内存映射的读取长度，从第三个内存映射获得新日志文件的内容</li>
+  <li>调用函数CreateFileMapping()，传入日志文件的句柄，创建一个文件映射内核对象</li>
+  <li>调用函数MapViewOfFile()将文件数据映射到进程的地址空间</li>
+  <li>修改内存数据，覆盖为新日志文件的内容</li>
+  <li>调用函数FlushViewOfFile()，将内存数据写入磁盘</li>
+  <li>关闭日志文件的内存映射</li>
+</ol>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-19/3-2.png" alt="Alt text"></p>
+
+<p><strong>注:</strong></p>
+
+<p>对于以上两种方法，删除<code class="language-plaintext highlighter-rouge">setup.evtx</code>是没有问题的，删除<code class="language-plaintext highlighter-rouge">system.evtx</code>和<code class="language-plaintext highlighter-rouge">security.evtx</code>会存在因为竞争条件导致删除失败的情况</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了第二种删除当前系统单条日志记录的方法：获得日志服务Eventlog对应进程中指定日志文件的句柄，通过Dll注入获得权限，利用该句柄实现日志文件的修改
+某些情况下，dll注入会失败，那么是否还有删除当前系统单条日志记录的方法呢？下一篇文章将会介绍</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on June 19, 2018
+  </div>
+
+  
+</article>

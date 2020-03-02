@@ -1,0 +1,333 @@
+<article class="post">
+  <h1>渗透技巧——Windows日志的删除与绕过</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试过程中，Windows日志往往会记录系统上的敏感操作，如添加用户，远程登录执行等。</p>
+
+<p>对于一次完整的渗透测试，通常会选择对Windows日志进行清除和绕过，而对于防御者来说，了解常用的绕过方法也有助于更好的保护自己的系统。</p>
+
+<p>所以本文将要介绍常见的Windows日志清除与绕过方法，分享经验，帮助大家。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>Windows日志的常用清除方法</li>
+  <li>Windows日志的两种绕过方法</li>
+</ul>
+
+<h2 id="0x02-windows日志">0x02 Windows日志</h2>
+<hr>
+
+<p>Windows日志包括五个类别：</p>
+
+<ul>
+  <li>应用程序</li>
+  <li>安全</li>
+  <li>Setup</li>
+  <li>系统</li>
+  <li>转发事件</li>
+</ul>
+
+<p><strong>查看方式：</strong></p>
+
+<p><strong>1、</strong> 通过面板</p>
+
+<p>位置如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Control Panel\System and Security-View event logs-Windows Logs</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/2-1.png" alt="Alt text"></p>
+
+<p><strong>2、</strong> 通过Powershell</p>
+
+<p>常用命令如下：</p>
+
+<p>(管理员权限)</p>
+
+<p>查看所有日志：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Get-WinEvent</code></p>
+
+<p>查看应用程序类别下的日志：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Get-WinEvent -FilterHashtable @{logname="Application";}</code></p>
+
+<h2 id="0x03-windows日志的常用清除方法">0x03 Windows日志的常用清除方法</h2>
+<hr>
+
+<h3 id="1wevtutilexe">1、wevtutil.exe</h3>
+
+<p>操作系统默认包含，支持系统：Win7及以上</p>
+
+<p>常用命令如下：</p>
+
+<p><strong>(1)</strong> 统计日志列表，查询所有日志信息，包含时间，数目</p>
+
+<p><code class="language-plaintext highlighter-rouge">wevtutil.exe gli Application</code></p>
+
+<p>操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/2-2.png" alt="Alt text"></p>
+
+<p><strong>(2)</strong> 查看指定类别的日志内容</p>
+
+<p><code class="language-plaintext highlighter-rouge">wevtutil qe /f:text Application</code></p>
+
+<p>操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/2-3.png" alt="Alt text"></p>
+
+<p><strong>(3)</strong> 删除该类日志所有内容</p>
+
+<p><code class="language-plaintext highlighter-rouge">wevtutil cl Application</code></p>
+
+<p>操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/2-4.png" alt="Alt text"></p>
+
+<p>Application日志全部清除，数目为0</p>
+
+<p><strong>(4)</strong> 删除单条内容</p>
+
+<p>尚不支持</p>
+
+<h3 id="2nsa-danderspiritz">2、NSA DanderSpiritz</h3>
+
+<p>DanderSpritz是NSA的一款界面化的远控工具</p>
+
+<p>相关介绍可参考：</p>
+
+<p>https://3gstudent.github.io/3gstudent.github.io/NSA-DanderSpiritz%E6%B5%8B%E8%AF%95%E6%8C%87%E5%8D%97-%E6%9C%A8%E9%A9%AC%E7%94%9F%E6%88%90%E4%B8%8E%E6%B5%8B%E8%AF%95/</p>
+
+<p>常用命令如下：</p>
+
+<p><strong>(1)</strong> 统计日志列表，查询所有日志信息，包含时间，数目</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogquery -log Application</code></p>
+
+<p><strong>(2)</strong> 查看指定类别的日志内容</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogfilter -log Application -num 10</code></p>
+
+<p><strong>(3)</strong> 删除该类日志所有内容</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogclear -log Application</code></p>
+
+<p><strong>(4)</strong> 删除单条内容</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogedit -log Application -record 1</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>record序号可通过eventlogfilter获得</p>
+
+<h2 id="0x04-windows日志的绕过方法">0x04 Windows日志的绕过方法</h2>
+<hr>
+
+<p>本文介绍的思路参考自Halil Dalabasmaz@hlldz的文章，地址如下：</p>
+
+<p>https://artofpwn.com/phant0m-killing-windows-event-log.html</p>
+
+<p><strong>绕过原理：</strong></p>
+
+<p>Windows日志对应于eventlog服务，找到该服务对应的进程svchost.exe，进而筛选出svchost.exe进程中具体实现日志功能的线程，调用TerminateThread结束线程，破坏日志记录功能</p>
+
+<p><strong>特别的地方：</strong></p>
+
+<p>由于只结束了实现日志功能的线程，所以Windows Event Log服务没有被破坏，状态仍为正在运行</p>
+
+<h3 id="绕过方法一">绕过方法一</h3>
+
+<p><strong>1、</strong> 定位eventlog服务对应进程svchost.exe的pid</p>
+
+<p><strong>2、</strong> 遍历该进程中的所有线程</p>
+
+<p><strong>3、</strong> 判断线程是否满足条件</p>
+
+<p>Windows Event Log 服务需要调用wevtsvc.dll，完整路径为<code class="language-plaintext highlighter-rouge">%WinDir%\System32\wevtsvc.dll</code></p>
+
+<p>并且，如果线程调用了wevtsvc.dll，就可以判读该线程实现了日志记录功能</p>
+
+<p><strong>4、</strong> 结束线程</p>
+
+<p>使用TerminateThread</p>
+
+<p><strong>注：</strong></p>
+
+<p>Halil Dalabasmaz@hlldz使用powershell实现了方法一，完整代码可参考：</p>
+
+<p>https://github.com/hlldz/Invoke-Phant0m</p>
+
+<p>powershell脚本执行后，Windows日志功能失效，无法记录日志，操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/3-1.png" alt="Alt text"></p>
+
+<p><strong>5、</strong> 恢复方法</p>
+
+<p>结束进程svchost.exe</p>
+
+<p>重新开启Windows Event Log 服务：</p>
+
+<p><code class="language-plaintext highlighter-rouge">net start eventlog</code></p>
+
+<p>操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/3-2.png" alt="Alt text"></p>
+
+<h3 id="绕过方法二">绕过方法二</h3>
+
+<p><strong>1、</strong> 定位eventlog服务对应进程svchost.exe的pid</p>
+
+<p>powershell代码如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Get-WmiObject -Class win32_service -Filter "name = 'eventlog'" | select -exp ProcessId</code></p>
+
+<p>找到svchost.exe的pid为7008，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/4-1.png" alt="Alt text"></p>
+
+<p><strong>2、</strong> 遍历该进程中的所有线程</p>
+
+<p>使用PsList</p>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://technet.microsoft.com/en-us/sysinternals/bb896682.aspx</p>
+
+<p>具体参数如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">pslist.exe /accepteula -d 7008</code></p>
+
+<p>获取进程svchost.exe中的所有线程，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/4-2.png" alt="Alt text"></p>
+
+<p><strong>3、</strong> 判断线程是否满足条件</p>
+
+<p>获取线程对应的服务，如果为eventlog，则满足条件</p>
+
+<p>使用工具：ScTagQuery</p>
+
+<p><strong>下载地址：</strong></p>
+
+<p>http://www.winsiderss.com/tools/sctagquery/sctagqry.zip</p>
+
+<p>具体参数如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">sctagqry.exe -t 7928</code></p>
+
+<p>根据返回的结果Service Tag，判断线程对应的服务</p>
+
+<p>找到对应eventlog的线程，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/4-3.png" alt="Alt text"></p>
+
+<p>线程8136符合条件，依次尝试，直到获取所有符合条件线程</p>
+
+<p><strong>注：</strong></p>
+
+<p>使用Process Explorer可以简化此过程</p>
+
+<p>找到eventlog服务对应进程svchost.exe</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/4-4.png" alt="Alt text"></p>
+
+<p>右键查看属性，选择Threads标签，查看线程,可直接获得线程对应的服务</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/4-5.png" alt="Alt text"></p>
+
+<p>符合条件的线程TID为：</p>
+
+<ul>
+  <li>8136</li>
+  <li>8052</li>
+  <li>6708</li>
+  <li>2316</li>
+  <li>6356</li>
+</ul>
+
+<p><strong>4、</strong> 结束线程</p>
+
+<p>调用TerminateThread</p>
+
+<p>通过c++实现，部分代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>int main(int argc, char* argv[])
+{	
+	printf("TerminateThread TID:\n");   	
+	for(int i=1;i&lt;argc;i++)
+	{	
+		printf("%s\n",argv[i]);
+		HANDLE hThread = OpenThread(0x0001, FALSE,atoi(argv[i]));
+		if(TerminateThread(hThread,0)==0)
+			printf("[!] TerminateThread Error, TID: %s \n",argv[i]);
+		CloseHandle(hThread);
+	}  
+	return 0;
+}
+</code></pre></div></div>
+
+<p>完整代码已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/Windwos-EventLog-Bypass/blob/master/TerminateEventLogThread.cpp</p>
+
+<p>控制台支持传入多个参数，向其传入5个TID： 8136 8052 6708 2316 6356</p>
+
+<p>自动结束对应线程，日志功能失效</p>
+
+<p>具体操作如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/4-6.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>稍后我会在github上更新该绕过方法的完整实现代码，地址如下：</p>
+
+<p>https://github.com/3gstudent/Windwos-EventLog-Bypass</p>
+
+<h2 id="0x05-补充">0x05 补充</h2>
+<hr>
+
+<h3 id="1安装sysmon可对windows日志功能进行扩展">1、安装sysmon可对Windows日志功能进行扩展</h3>
+
+<p>相关介绍和绕过思路可参考;</p>
+
+<p>https://3gstudent.github.io/3gstudent.github.io/%E9%80%9A%E8%BF%87APC%E5%AE%9E%E7%8E%B0Dll%E6%B3%A8%E5%85%A5-%E7%BB%95%E8%BF%87Sysmon%E7%9B%91%E6%8E%A7/</p>
+
+<h3 id="2绕过方法仅针对windows日志">2、绕过方法仅针对Windows日志</h3>
+
+<p>对应用程序和服务日志失效，例如Windows Powershell</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-6-23/5-1.png" alt="Alt text"></p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文对Windows日志的清除和绕过方法做了介绍，希望能够帮助大家，接下来会分享绕过方法二的具体程序实现方法。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+  </div>
+
+  <div class="date">
+    Written on June 23, 2017
+  </div>
+
+  
+</article>

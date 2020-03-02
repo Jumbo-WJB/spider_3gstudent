@@ -1,0 +1,275 @@
+<article class="post">
+  <h1>对APT34泄露工具的分析——Jason</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Jason是由Lab Dookhtegan在2019年6月3日泄露的另一款工具，用于Exchange账户的暴力破解</p>
+
+<p>然而，泄露的这款工具虽然包括源码，但存在一些bug，无法正常使用</p>
+
+<p>本文不会分析Jason和APT34之间的关联，仅在技术研究的角度，修复Jason的bug，恢复Jason的功能，分析使用的技术，同其他开源工具做横向比较</p>
+
+<p><strong>注：</strong></p>
+
+<p>之前关于APT34的分析文章：</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/%E5%AF%B9APT34%E6%B3%84%E9%9C%B2%E5%B7%A5%E5%85%B7%E7%9A%84%E5%88%86%E6%9E%90-PoisonFrog%E5%92%8CGlimpse/">《对APT34泄露工具的分析——PoisonFrog和Glimpse》</a></p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/%E5%AF%B9APT34%E6%B3%84%E9%9C%B2%E5%B7%A5%E5%85%B7%E7%9A%84%E5%88%86%E6%9E%90-HighShell%E5%92%8CHyperShell/">《对APT34泄露工具的分析——HighShell和HyperShell》</a></p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>Jason的开源资料</li>
+  <li>修复Jason的bug</li>
+  <li>实际测试Jason</li>
+  <li>同其他开源工具的横向比较</li>
+</ul>
+
+<h2 id="0x02-jason的开源资料">0x02 Jason的开源资料</h2>
+<hr>
+
+<p>Jason最早泄露于Telegram的频道：https://t.me/lab_dookhtegana</p>
+
+<p>p3pperp0tts将其上传至Github，地址如下：</p>
+
+<p>https://github.com/p3pperp0tts/APT34/tree/master/Jason</p>
+
+<p>文件夹decompiled_code内为Jason的源码</p>
+
+<p>Jason采用EWS Managed API来实现对Exchange资源的访问</p>
+
+<p><strong>注：</strong></p>
+
+<p>关于EWS Managed API的使用细节可参考之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/Exchange-Web-Service(EWS)%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97/">《Exchange Web Service(EWS)开发指南》</a></p>
+
+<p>经过简单的修复，我在VS2015下能够编译成功</p>
+
+<p>但在测试环境中，Jason无法识别正确的邮箱用户名和口令，所有测试结果均失败</p>
+
+<h2 id="0x03-修复jason的bug">0x03 修复Jason的bug</h2>
+<hr>
+
+<p>编译环境: VS2015</p>
+
+<p>为了恢复正常功能，源代码需要修改以下4个位置</p>
+
+<h3 id="1添加microsoftexchangewebservicesdll的引用">1.添加Microsoft.Exchange.WebServices.dll的引用</h3>
+
+<p>我这里是将Microsoft.Exchange.WebServices.dll放在工程的同级目录下，并做了引用</p>
+
+<h3 id="2证书信任策略的bug修正">2.证书信任策略的bug修正</h3>
+
+<p>位置：Form1.cs</p>
+
+<p>原代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ServicePointManager.ServerCertificateValidationCallback = ((object &lt;p0&gt;, X509Certificate &lt;p1&gt;, X509Chain &lt;p2&gt;, SslPolicyErrors &lt;p3&gt;) =&gt; true);
+</code></pre></div></div>
+
+<p>修改后的代码:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ServicePointManager.ServerCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) =&gt; { return true; };
+</code></pre></div></div>
+
+<h3 id="3变量赋值的bug修正">3.变量赋值的bug修正</h3>
+
+<p>位置：Form1.cs</p>
+
+<p>(1)共有两个位置</p>
+
+<p>原代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MainConfig.AppLocation + "out.txt";
+</code></pre></div></div>
+
+<p>修改后的代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MainConfig.AppLocation = MainConfig.AppLocation + "out.txt";
+</code></pre></div></div>
+
+<p>(2)共有两个位置</p>
+
+<p>原代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MainConfig.UsernameStart + userClass.Username + MainConfig.UsernameEnd;
+</code></pre></div></div>
+
+<p>修改后的代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>userClass.Username = MainConfig.UsernameStart + userClass.Username + MainConfig.UsernameEnd;
+</code></pre></div></div>
+
+<h3 id="4ews和oab的判断有问题">4.EWS和OAB的判断有问题</h3>
+
+<p>经过测试，变量MainConfig.Method的值始终为空</p>
+
+<p>需要修正MainConfig.Method无法取值的bug</p>
+
+<p>位置：Form1.cs</p>
+
+<p>原代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MainConfig.Method = this.cmbMethod.SelectedText;
+</code></pre></div></div>
+
+<p>修改后的代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MainConfig.Method = (string)this.cmbMethod.SelectedItem;
+</code></pre></div></div>
+
+<p>实现完整功能的工程我已上传至github，地址如下:</p>
+
+<p>https://github.com/3gstudent/APT34-Jason</p>
+
+<h2 id="0x04-实际测试jason">0x04 实际测试Jason</h2>
+<hr>
+
+<p>编译成功后生成文件Jason.exe</p>
+
+<p>在同级目录需要文件Microsoft.Exchange.WebServices.dll，程序才可以正常运行</p>
+
+<p>程序启动后，需要设置的配置如下：</p>
+
+<h3 id="1exchange-address">1.Exchange Address</h3>
+
+<p>输入Exchange服务器的URL</p>
+
+<p>在我的测试环境下，Exchange Address为：https://192.168.206.17</p>
+
+<h3 id="2exchange-version">2.Exchange Version</h3>
+
+<p>选择对应的版本</p>
+
+<p>此处选择低版本能够适用于高版本的Exchange服务器</p>
+
+<h3 id="3bf-method">3.BF Method</h3>
+
+<p>三个选项：</p>
+
+<ul>
+  <li>EWS(Exchange Web Service)</li>
+  <li>OAB(Offline Address Book)</li>
+  <li>Full</li>
+</ul>
+
+<p>通常选择EWS</p>
+
+<h3 id="4username-file">4.Username File</h3>
+
+<p>用户名的字典文件</p>
+
+<p>格式可参考PassSample.txt中提示的格式</p>
+
+<p>我的测试环境下，我用的格式示例为：</p>
+
+<p>test1@test.com
+admin@test.com</p>
+
+<h3 id="5password-file">5.Password File</h3>
+
+<p>口令字典文件</p>
+
+<h3 id="6number-of-threads">6.Number of Threads</h3>
+
+<p>设置扫描线程个数</p>
+
+<h3 id="7generate-pass">7.Generate Pass</h3>
+
+<p>点击后显示暴力破解使用的字典</p>
+
+<h3 id="8generate-pass-per">8.Generate Pass Per</h3>
+
+<p>点击后生成文件夹PasswordPerUser，文件夹中生成以每个用户名命名的txt文件，内容为口令字典</p>
+
+<h3 id="9add-to-username-start">9.Add to Username Start</h3>
+
+<p>产生新的用户，将输入的字符加在用户名前面</p>
+
+<p>测试环境下建议不设置</p>
+
+<h3 id="10add-to-username-end">10.Add to Username End</h3>
+
+<p>产生新的用户，将输入的字符加在用户名后面</p>
+
+<p>测试环境下建议不设置</p>
+
+<p>我的测试环境下，配置如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-7-30/2-1.png" alt="Alt text"></p>
+
+<p>暴力破解成功后，生成日志文件out-year-month-day-hour-minute-second.txt，保存用户名和对应的口令</p>
+
+<h2 id="0x05-同其他开源工具的横向比较">0x05 同其他开源工具的横向比较</h2>
+<hr>
+
+<h3 id="1jason">1.Jason</h3>
+
+<ul>
+  <li>C#实现</li>
+  <li>对Exchange进行暴力破解的位置：
+    <ul>
+      <li>https://url/ews/exchange.asmx</li>
+      <li>https://url/oab</li>
+    </ul>
+  </li>
+  <li>支持多线程</li>
+  <li>界面操作</li>
+</ul>
+
+<h3 id="2mailsniper">2.MailSniper</h3>
+
+<ul>
+  <li>https://github.com/dafthack/MailSniper</li>
+  <li>Powershell实现</li>
+  <li>对Exchange进行暴力破解的位置：
+    <ul>
+      <li>https://url/ews/exchange.asmx</li>
+      <li>https://url/owa</li>
+    </ul>
+  </li>
+  <li>支持多线程</li>
+  <li>命令行操作</li>
+</ul>
+
+<h3 id="3ruler">3.Ruler</h3>
+
+<ul>
+  <li>https://github.com/sensepost/ruler</li>
+  <li>Go实现</li>
+  <li>对Exchange进行暴力破解的位置：
+    <ul>
+      <li>https://url/autodiscover/autodiscover.xml</li>
+    </ul>
+  </li>
+  <li>不支持多线程</li>
+  <li>命令行操作</li>
+</ul>
+
+<p>对于Exchange账户的暴力破解，在原理上大同小异，都是访问Exchange的Web资源，如果返回401表示验证失败，如果获得预期结果代表用户口令正确</p>
+
+<p>对于Jason，同MailSniper和Ruler相比，原理和功能基本相同，个人认为该工具不存在被大规模滥用的隐患，也不会导致恶意软件技术的升级</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了如何修复Jason的bug，分析其中的技术，同其他开源工具做了横向比较，得出最终结论：个人认为该工具不存在被大规模滥用的隐患，也不会导致恶意软件技术的升级</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on July 30, 2019
+  </div>
+
+  
+</article>

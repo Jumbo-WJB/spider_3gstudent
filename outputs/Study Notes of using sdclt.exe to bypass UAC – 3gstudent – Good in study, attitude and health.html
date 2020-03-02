@@ -1,0 +1,174 @@
+<article class="post">
+  <h1>Study Notes of using sdclt.exe to bypass UAC</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Matt Nelson‏ @enigma0x3在最近的文章中公开了一个绕过Win10 UAC的技巧，通过修改HKCU下的注册表键值实现对UAC的绕过，文章地址如下：</p>
+
+<p>https://enigma0x3.net/2017/03/14/bypassing-uac-using-app-paths/</p>
+
+<p>https://enigma0x3.net/2017/03/17/fileless-uac-bypass-using-sdclt-exe/</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将对其进行测试，分享测试心得，整理该方法的攻防技巧</p>
+
+<h2 id="0x02-原理">0x02 原理</h2>
+<hr>
+
+<p><strong>Sigcheck</strong></p>
+
+<p>可用来查看exe文件的清单(manifest)</p>
+
+<p><strong>下载地址：</strong></p>
+
+<p>https://technet.microsoft.com/en-us/sysinternals/bb897441.aspx</p>
+
+<p>在Win10环境下，cmd下运行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">sigcheck.exe -m c:\windows\system32\sdclt.exe</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-0.png" alt="Alt text"></p>
+
+<p>level=”requireAdministrator”</p>
+
+<p>true代表可自动提升权限</p>
+
+<p>在Win7环境下，同样使用Sigcheck查看sdclt.exe</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-01.png" alt="Alt text"></p>
+
+<p>level=”asInvoker”表示不会提升权限，这也就是不支持Win7的原因</p>
+
+<p>接下来，使用ProcessMonitor监控sdclt.exe的启动过程，查找是否会调用其他程序</p>
+
+<h2 id="0x03-实际测试">0x03 实际测试</h2>
+<hr>
+
+<p>测试环境： Win 10 x64</p>
+
+<p><strong>注：</strong></p>
+
+<p>该方法只在Win10下测试成功</p>
+
+<p>cmd下输入：</p>
+
+<p><code class="language-plaintext highlighter-rouge">sdclt.exe</code></p>
+
+<p>正常启动，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-1.png" alt="Alt text"></p>
+
+<p>使用ProcessMonitor查看启动过程</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-2.png" alt="Alt text"></p>
+
+<p>启动sdclt.exe的过程中会以High权限查找注册表键值<code class="language-plaintext highlighter-rouge">HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\control.exe</code></p>
+
+<p>如果手动修改该注册表键值，填入参数，那么就能够实现UAC的绕过</p>
+
+<p><strong>绕过方法如下：</strong></p>
+
+<p>新建注册表键值：</p>
+
+<p><code class="language-plaintext highlighter-rouge">HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\control.exe</code></p>
+
+<p>并将默认值设置为<code class="language-plaintext highlighter-rouge">cmd.exe</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-3.png" alt="Alt text"></p>
+
+<p>再次启动sdclt.exe，发现转而去执行cmd.exe，并且实现了对UAC的绕过，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-4.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>启动的exe不能加参数，否则失败</p>
+
+<p>例如填入C:\Windows\System32\cmd.exe /c calc.exe，无法实现利用</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-5.png" alt="Alt text"></p>
+
+<p>在实际利用的过程中，如果需要加参数，可通过先将参数写入脚本，再加载脚本的方式进行利用</p>
+
+<p>为了更好的隐蔽，实现“无文件”利用，可以尝试寻找sdclt.exe是否存在支持传入参数的命令</p>
+
+<p>Matt Nelson‏ @enigma0x3的第二篇文章就是解决了这个问题，文章地址如下：</p>
+
+<p>https://enigma0x3.net/2017/03/17/fileless-uac-bypass-using-sdclt-exe/</p>
+
+<p>修改注册表，劫持<code class="language-plaintext highlighter-rouge">/kickoffelev</code>传入的参数，实现“无文件”利用</p>
+
+<p><strong>具体方法如下：</strong></p>
+
+<p>新建注册表键值：</p>
+
+<p><code class="language-plaintext highlighter-rouge">HKCU:\Software\Classes\exefile\shell\runas\command\</code></p>
+
+<p>新建项<code class="language-plaintext highlighter-rouge">isolatedCommand</code>，类型<code class="language-plaintext highlighter-rouge">REG_SZ</code>，内容作为启动参数，可设置为<code class="language-plaintext highlighter-rouge">notepad.exe</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-6.png" alt="Alt text"></p>
+
+<p>接着在cmd下输入：</p>
+
+<p><code class="language-plaintext highlighter-rouge">sdclt.exe /KickOffElev</code></p>
+
+<p>成功执行参数，启动notetad.exe，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-7.png" alt="Alt text"></p>
+
+<p>参数换成regedit.exe，启动过程并未被UAC拦截，成功绕过</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-3-23/2-8.png" alt="Alt text"></p>
+
+<p>但是通过创建注册表键值exefile\shell\runas\command\会影响其他正常exe程序的启动，所以在利用上需要先创建键值，执行sdclt.exe，之后再删除该键值</p>
+
+<p>整个过程通过powershell实现，完整POC可参考：</p>
+
+<p>https://github.com/enigma0x3/Misc-PowerShell-Stuff/blob/master/Invoke-SDCLTBypass.ps1</p>
+
+<h2 id="0x04-防御和检测">0x04 防御和检测</h2>
+<hr>
+
+<p><strong>防御：</strong></p>
+
+<p>UAC权限设置为“Always Notify”，那么该方法将会失效</p>
+
+<p><strong>检测：</strong></p>
+
+<p>监控注册表键值：</p>
+
+<p><code class="language-plaintext highlighter-rouge">HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\control.exe</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">HKCU:\Software\Classes\exefile\shell\runas\command\</code></p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on March 23, 2017
+  </div>
+
+  
+</article>

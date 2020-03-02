@@ -1,0 +1,445 @@
+<article class="post">
+  <h1>NSA DanderSpiritz测试指南——木马生成与测试</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>DanderSpritz是NSA的一款界面化的远控工具，基于FuzzBunch框架，执行Start.jar即可启动</p>
+
+<p>在实际测试过程中，由于缺少说明文档，遇到的问题有很多，同时一些细节也值得深入研究</p>
+
+<p>所以本文将要帮助大家答疑解惑，分享测试心得，结合木马特点分析防御思路</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>执行pc_prep无法获得回显的原因及解决方法</li>
+  <li>Pc同Pc2.2的区别</li>
+  <li>level3和level4木马代表的含义及如何使用</li>
+  <li>各类型木马区别</li>
+  <li>dll木马利用方式</li>
+  <li>Windows单条日志删除功能</li>
+  <li>木马查杀思路</li>
+</ul>
+
+<h2 id="0x02-实际测试">0x02 实际测试</h2>
+<hr>
+
+<p>测试环境：</p>
+
+<ul>
+  <li>Win7 x86</li>
+</ul>
+
+<p>安装如下工具：</p>
+
+<ul>
+  <li>python2.6</li>
+  <li>pywin32</li>
+  <li>jdk</li>
+</ul>
+
+<h3 id="1下载fuzzbunch">1、下载fuzzbunch</h3>
+
+<p><strong>参考链接：</strong></p>
+
+<p>https://github.com/3gstudent/fuzzbunch</p>
+
+<p><strong>注：</strong></p>
+
+<p>我fork了公开的fuzzbunch项目(https://github.com/fuzzbunch/fuzzbunch)，并添加了部分内容，解决了一个bug，具体内容会在后面介绍</p>
+
+<h3 id="2直接运行startjar">2、直接运行Start.jar</h3>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-1.png" alt="Alt text"></p>
+
+<p>设置启动参数，Log Directory需要设置成固定格式：c:\logs\xxx(xxx任意名称)</p>
+
+<p>否则，会出现报错，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>网上的部分分析文章认为应该先用fb.py生成一个日志文件，接着Start.jar指向该目录，其实不需要，只要路径格式正确即可</p>
+
+<h3 id="3执行pc_prep配置木马">3、执行pc_prep配置木马</h3>
+
+<p>输入pc_prep获得回显，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-3.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>有很多人在测试的时候发现输入pc_prep无法获得回显，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-4.png" alt="Alt text"></p>
+
+<p><strong>原因：</strong></p>
+
+<p>fuzzbunch工程下载自如下链接：</p>
+
+<p>https://github.com/x0rz/EQGRP_Lost_in_Translation</p>
+
+<p>文件缺失，导致该错误</p>
+
+<p><strong>正确的下载位置：</strong></p>
+
+<p>https://github.com/fuzzbunch/fuzzbunch</p>
+
+<p>但是，下载后还需要补全缺失的文件，才能完全正常使用</p>
+
+<p>我fork了上述工程，并补全了缺失文件，下载我的github即可解决上述问题，地址如下：</p>
+
+<p>https://github.com/3gstudent/fuzzbunch</p>
+
+<p><strong>补充：</strong></p>
+
+<p>在之前的测试过程中，使用了存在bug的版本，虽然<code class="language-plaintext highlighter-rouge">pc_prep</code>无法获得回显，但是使用<code class="language-plaintext highlighter-rouge">pc2.2_prep</code>可以生成木马</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-5.png" alt="Alt text"></p>
+
+<p>可是木马无法回连</p>
+
+<p><strong>猜测原因：</strong></p>
+
+<p>pc相对于Pc2.2版本更高，低版本已经不再使用</p>
+
+<p>查看<code class="language-plaintext highlighter-rouge">\Resources\Pc2.2\Version.xml</code>，显示：<code class="language-plaintext highlighter-rouge">PeddleCheap 2.2.0.2</code></p>
+
+<p>表示Pc2.2对应的PeddleCheap版本为2.2.0.2</p>
+
+<p>查看<code class="language-plaintext highlighter-rouge">\Resources\Pc\Version.xml</code>，显示：<code class="language-plaintext highlighter-rouge">PeddleCheap 2.3.0</code></p>
+
+<p>表示Pc对应的PeddleCheap版本为2.3.0</p>
+
+<p><strong>注：</strong></p>
+
+<p>PeddleCheap用来操作同木马通信，在DanderSpritz主面板显示</p>
+
+<h3 id="4木马分类">4、木马分类</h3>
+
+<p>可选择的木马类型如下：</p>
+
+<ul>
+  <li>1) - Standard TCP (i386-winnt Level3 sharedlib)</li>
+  <li>2) - HTTP Proxy (i386-winnt Level3 sharedlib)</li>
+  <li>3) - Standard TCP (i386-winnt Level3 exe)</li>
+  <li>4) - HTTP Proxy (i386-winnt Level3 exe)</li>
+  <li>5) - Standard TCP (x64-winnt Level3 sharedlib)</li>
+  <li>6) - HTTP Proxy (x64-winnt Level3 sharedlib)</li>
+  <li>7) - Standard TCP (x64-winnt Level3 exe)</li>
+  <li>8) - HTTP Proxy (x64-winnt Level3 exe)</li>
+  <li>9) - Standard TCP Generic (i386-winnt Level4 sharedlib)</li>
+  <li>10) - HTTP Proxy Generic (i386-winnt Level4 sharedlib)</li>
+  <li>11) - Standard TCP AppCompat-enabled (i386-winnt Level4 sharedlib)</li>
+  <li>12) - HTTP Proxy AppCompat-enabled (i386-winnt Level4 sharedlib)</li>
+  <li>13) - Standard TCP UtilityBurst-enabled (i386-winnt Level4 sharedlib)</li>
+  <li>14) - HTTP Proxy UtilityBurst-enabled (i386-winnt Level4 sharedlib)</li>
+  <li>15) - Standard TCP WinsockHelperApi-enabled (i386-winnt Level4 sharedlib)</li>
+  <li>16) - HTTP Proxy WinsockHelperApi-enabled (i386-winnt Level4 sharedlib)</li>
+  <li>17) - Standard TCP (i386-winnt Level4 exe)</li>
+  <li>18) - HTTP Proxy (i386-winnt Level4 exe)</li>
+  <li>19) - Standard TCP (x64-winnt Level4 sharedlib)</li>
+  <li>20) - HTTP Proxy (x64-winnt Level4 sharedlib)</li>
+  <li>21) - Standard TCP AppCompat-enabled (x64-winnt Level4 sharedlib)</li>
+  <li>22) - HTTP Proxy AppCompat-enabled (x64-winnt Level4 sharedlib)</li>
+  <li>23) - Standard TCP WinsockHelperApi-enabled (x64-winnt Level4 sharedlib)</li>
+  <li>24) - HTTP Proxy WinsockHelperApi-enabled (x64-winnt Level4 sharedlib)</li>
+  <li>25) - Standard TCP (x64-winnt Level4 exe)</li>
+  <li>26) - HTTP Proxy (x64-winnt Level4 exe)</li>
+</ul>
+
+<p>按平台区分：</p>
+
+<ul>
+  <li>x86</li>
+  <li>x64</li>
+</ul>
+
+<p>按文件格式区分：</p>
+
+<ul>
+  <li>exe</li>
+  <li>dll</li>
+</ul>
+
+<p>按通信协议区分:</p>
+
+<ul>
+  <li>Standard TCP</li>
+  <li>HTTP Proxy</li>
+</ul>
+
+<p>按功能区分：</p>
+
+<ul>
+  <li>Standard</li>
+  <li>AppCompat-enabled</li>
+  <li>UtilityBurst-enabled</li>
+  <li>WinsockHelperApi-enabled</li>
+</ul>
+
+<p>按Level区分：</p>
+
+<ul>
+  <li>Level3</li>
+  <li>Level4</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>经实际测试，Level代表回连方式</p>
+
+<p>level3表示反向连接，控制端监听端口，等待回连</p>
+
+<p>leve4表示正向连接，目标主机监听端口，等待控制端主动连接</p>
+
+<h3 id="5木马测试">5、木马测试</h3>
+
+<p>选择代表性的进行测试</p>
+
+<p><strong>(1)</strong> Level3，选择 3) - Standard TCP (i386-winnt Level3 exe)</p>
+
+<ul>
+  <li>按配置生成exe(此处不具体介绍，参照其他文章)</li>
+  <li>DanderSpiritz控制端选择PeddleCheap-Listen-Start Listening</li>
+  <li>在目标主机直接执行exe</li>
+  <li>等待回连</li>
+</ul>
+
+<p>操作同正常的反向连接木马</p>
+
+<p><strong>注：</strong></p>
+
+<p>日志文件下生成2个文件<code class="language-plaintext highlighter-rouge">PC_Level3_exe.base</code>和<code class="language-plaintext highlighter-rouge">PC_Level3_exe.configured</code></p>
+
+<p>PC_Level3_exe.base为模板文件，来自于<code class="language-plaintext highlighter-rouge">\Resources\Pc\Level3\i386-winnt\release</code></p>
+
+<p>PC_Level3_exe.configured为加入配置参数的文件</p>
+
+<p>两个文件大小相同，但在特定位置存在差异，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-6.png" alt="Alt text"></p>
+
+<p><strong>(2)</strong>  Level3，选择 6) - HTTP Proxy (x64-winnt Level3 sharedlib)</p>
+
+<p>按配置生成PC_Level3_http_dll.configured(此处不具体介绍，参照其他文章)</p>
+
+<p>加载方式：</p>
+
+<p>1.利用DoublePulsar加载dll</p>
+
+<p>(此处不具体介绍，参照其他文章)</p>
+
+<p>2.手动加载dll</p>
+
+<p>使用dumpbin查看dll的导出函数，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-7.png" alt="Alt text"></p>
+
+<p>ordinal为1对应的dll导出函数名为rst32</p>
+
+<p>也就是说，我们可以尝试通过rundll32直接加载该dll</p>
+
+<p>命令行代码如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">rundll32 PC_Level3_http_dll.configured,rst32</code></p>
+
+<p>木马正常回连</p>
+
+<p><strong>注：</strong></p>
+
+<p>对于http协议的木马，记得设置listen协议的时候要选择http</p>
+
+<p><strong>(3)</strong> Level4，选择 17) - Standard TCP (i386-winnt Level4 exe)</p>
+
+<p>按配置生成PC_Level4_exe.configured(可使用高级模式，指定固定监听端口)</p>
+
+<p>启动exe后执行netstat -ano可看到开启了固定端口</p>
+
+<p>DanderSpiritz控制端选择PeddleCheap-Connect，选择ip，填入Level 4对应的端口</p>
+
+<p>正向连接</p>
+
+<p><strong>(4)</strong> Level4，选择 9) - Standard TCP Generic (i386-winnt Level4 sharedlib)</p>
+
+<p>按配置生成PC_Level4_dll.configured(可使用高级模式，指定固定监听端口)</p>
+
+<p>查看其导出函数，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/3-1.png" alt="Alt text"></p>
+
+<p>也就是说，不支持直接通过rundll32加载</p>
+
+<p><strong>猜测：</strong></p>
+
+<p>Level4的木马要一直运行在后台，考虑到隐蔽性，所以不支持该功能</p>
+
+<p>给出一种dll加载的测试方法：通过APC注入</p>
+
+<p>如下图，成功加载，打开监听端口</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-8.png" alt="Alt text"></p>
+
+<p><strong>参考代码：</strong></p>
+
+<p>https://github.com/3gstudent/Inject-dll-by-APC/blob/master/test.cpp</p>
+
+<p><strong>注：</strong></p>
+
+<p>被注入的程序需要管理员权限，否则会因为权限问题无法打开监听端口</p>
+
+<p>给出另一种dll加载的测试方法：通过Application Compatibility Shims</p>
+
+<p>可参考以下链接：</p>
+
+<p>https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%B5%8B%E8%AF%95%E4%B8%AD%E7%9A%84Application-Compatibility-Shims/</p>
+
+<p>如下图，成功加载，打开监听端口</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/2-9.png" alt="Alt text"></p>
+
+<p><strong>(5)</strong> Level4，选择 11) - Standard TCP AppCompat-enabled (i386-winnt Level4 sharedlib)</p>
+
+<p>根据字面意思，猜测是支持Application Compatibility Shims</p>
+
+<p>比较Generic和AppCompat-enabled的区别：</p>
+
+<p>二者大小一样，就是AppCompat-enabled多了一个导出函数GetHookAPIs</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/3-2.png" alt="Alt text"></p>
+
+<h2 id="0x03-木马功能">0x03 木马功能</h2>
+<hr>
+
+<p>木马连接成功后，自动开始信息搜集，返回各种详细信息</p>
+
+<p>比较人性化的设计是会自动询问用户是否提权</p>
+
+<p>在检测到环境安全后会询问用户是否需要导出hash</p>
+
+<p>待信息搜集完成后，输入help可获得支持的操作</p>
+
+<p><strong>注：</strong></p>
+
+<p>help获得的内容不完整，输入aliases可获得更多操作命令介绍</p>
+
+<p>help+命令可获得具体命令的操作介绍</p>
+
+<p>例如，输入help eventlogedit，回显如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-4-26/3-3.png" alt="Alt text"></p>
+
+<h3 id="1日志操作功能">1、日志操作功能</h3>
+
+<p>关于日志操作的命令如下：</p>
+
+<ul>
+  <li>eventlogclear</li>
+  <li>eventlogedit</li>
+  <li>eventlogfilter</li>
+  <li>eventlogquery</li>
+</ul>
+
+<p><strong>具体功能如下：</strong></p>
+
+<p><strong>eventlogquery：</strong></p>
+
+<p>统计日志列表，查询所有日志信息，包含时间，数目</p>
+
+<p>可查询指定类别的日志信息，包含时间，数目，命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogquery -log Setup</code></p>
+
+<p>该操作等价于</p>
+
+<p><code class="language-plaintext highlighter-rouge">wevtutil.exe gli setup</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>wevtutil.exe操作系统默认包含</p>
+
+<p><strong>eventlogfilter：</strong></p>
+
+<p>查看指定类别的日志内容</p>
+
+<p>命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogfilter -log Setup -num 19</code></p>
+
+<p>该操作等价于</p>
+
+<p><code class="language-plaintext highlighter-rouge">wevtutil qe /f:text setup</code></p>
+
+<p><strong>eventlogedit：</strong></p>
+
+<p>删除单条日志</p>
+
+<p>可删除单条日志内容，命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogedit -log Setup -record 1</code></p>
+
+<p><strong>注：</strong>
+record序号可通过eventlogfilter获得</p>
+
+<p>该命令暂没有公开工具支持</p>
+
+<p><strong>eventlogclear：</strong></p>
+
+<p>删除该类日志所有内容</p>
+
+<p>命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">eventlogclear -log Microsoft-Windows-Dhcpv6-Client/Admin</code></p>
+
+<p>该操作等价于</p>
+
+<p><code class="language-plaintext highlighter-rouge">wevtutil cl Microsoft-Windows-Dhcpv6-Client/Admin</code></p>
+
+<h2 id="0x04-木马查杀思路">0x04 木马查杀思路</h2>
+<hr>
+
+<p>DanderSpritz的木马生成方式如下：</p>
+
+<p>文件夹\Resources\Pc\Level3和\Resources\Pc\Level4下保存模板文件，固定位置预留参数配置信息，实际生成时向模板文件写入配置信息</p>
+
+<p>目前杀毒软件已经对这些模板文件成功识别并查杀，同时，这些模板文件的代码并没有开源，也会提高在恶意利用上面的门槛</p>
+
+<p>建议普通用户：</p>
+
+<ul>
+  <li>更新系统补丁</li>
+  <li>更新杀毒软件病毒库</li>
+</ul>
+
+<p>就能够防范该工具的攻击</p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文分享了DanderSpiritz的测试心得，希望能够帮助大家在技术研究上对其有更好的认识，省略了部分具体利用细节和章节，以防该工具被滥用</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on April 26, 2017
+  </div>
+
+  
+</article>

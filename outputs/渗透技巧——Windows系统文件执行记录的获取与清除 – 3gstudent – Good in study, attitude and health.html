@@ -1,0 +1,603 @@
+<article class="post">
+  <h1>渗透技巧——Windows系统文件执行记录的获取与清除</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>站在渗透的角度，当获得了一台Windows主机的权限后，需要全面了解这台Windows主机的信息，文件执行记录是重要的部分。</p>
+
+<p>而站在防御的角度，文件执行记录包含系统的重要信息，对其进行针对性的清除很有必要。</p>
+
+<p>所以本文将尝试对Windows主机(Win7及以上系统)常见文件执行记录的位置进行整理，尝试获取并清除单条记录，分析利用思路，总结防御方法。</p>
+
+<p>参考链接：</p>
+
+<p>https://blog.1234n6.com/2018/10/available-artifacts-evidence-of.html?m=1
+https://xz.aliyun.com/t/3067#toc-5</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>从日志获得文件执行记录</li>
+  <li>从注册表获得文件执行记录</li>
+  <li>从文件获得文件执行记录</li>
+  <li>实例测试</li>
+  <li>利用和防御思路</li>
+</ul>
+
+<h2 id="0x02-从日志获得文件执行记录">0x02 从日志获得文件执行记录</h2>
+<hr>
+
+<h3 id="1进程创建id4688">1、进程创建(ID:4688)</h3>
+
+<p>使用条件：</p>
+
+<p>系统默认关闭该功能，需要手动设置开启</p>
+
+<p>Policy location: <code class="language-plaintext highlighter-rouge">Computer Configuration</code> -&gt; <code class="language-plaintext highlighter-rouge">Policies</code> -&gt; <code class="language-plaintext highlighter-rouge">Windows Settings</code> -&gt; <code class="language-plaintext highlighter-rouge">Security Settings</code> -&gt; <code class="language-plaintext highlighter-rouge">Advanced Audit Configuration</code> -&gt; <code class="language-plaintext highlighter-rouge">Detailed Tracking</code></p>
+
+<p>Policy Name: <code class="language-plaintext highlighter-rouge">Audit Process Creation</code></p>
+
+<p>命令行获得日志信息：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil qe security /rd:true /f:text /q:"Event[System[(EventID=4688)]]"
+</code></pre></div></div>
+
+<h4 id="清除记录的方法">清除记录的方法：</h4>
+
+<p>单条日志的清除，可参考之前的文章：</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Windows%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E7%9A%84%E5%88%A0%E9%99%A4/">《渗透技巧——Windows单条日志的删除》</a></p>
+
+<h3 id="2microsoft-windows-application-experience-program-inventory">2、Microsoft-Windows-Application-Experience Program-Inventory</h3>
+
+<p>参考资料：</p>
+
+<p>http://journeyintoir.blogspot.com/2014/03/exploring-program-inventory-event-log.html</p>
+
+<ul>
+  <li>800 (summary of software activities)</li>
+  <li>903 &amp; 904 (new application installation)</li>
+  <li>905 &amp; 906 (updated application)</li>
+  <li>907 &amp; 908 (removed application).</li>
+</ul>
+
+<p>命令行获得日志信息：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil qe Microsoft-Windows-Application-Experience/Program-Inventory
+</code></pre></div></div>
+
+<h3 id="3microsoft-windows-application-experience-program-telemetry">3、Microsoft-Windows-Application-Experience Program-Telemetry</h3>
+
+<p>命令行获得日志信息：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil qe Microsoft-Windows-Application-Experience/Program-Telemetry
+</code></pre></div></div>
+
+<h2 id="0x03-从注册表获得文件执行记录">0x03 从注册表获得文件执行记录</h2>
+<hr>
+
+<h3 id="1shimcache">1、ShimCache</h3>
+
+<p>参考资料：</p>
+
+<p>https://www.fireeye.com/blog/threat-research/2015/06/caching_out_the_val.html</p>
+
+<p>用来记录Windows系统程序执行时产生的兼容性问题</p>
+
+<p>位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache
+</code></pre></div></div>
+
+<p>XP最多保存96条记录，Win7及以上最多保存1024条记录</p>
+
+<p>记录以下内容：</p>
+
+<ul>
+  <li>文件路径</li>
+  <li>上次修改时间</li>
+  <li>是否被执行</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>ShimCache不仅会记录exe文件的执行，而且会对exe文件同级目录下的文件进行记录(如果文件没有执行，那么Executed的属性为no)</p>
+
+<p>数据以固定格式保存，存储结构可参考：</p>
+
+<p>https://www.fireeye.com/content/dam/fireeye-www/services/freeware/shimcache-whitepaper.pdf</p>
+
+<h4 id="解析工具">解析工具</h4>
+
+<p>(1)</p>
+
+<p>源代码开源(c#)</p>
+
+<p>https://github.com/EricZimmerman/AppCompatCacheParser/</p>
+
+<p>用法示例：</p>
+
+<p>读取当前系统的注册表并将结果输出的到指定路径：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>AppCompatCacheParser.exe --csv c:\test
+</code></pre></div></div>
+
+<p>输出结果按照上次修改的时间排序:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>AppCompatCacheParser.exe --csv c:\test -t
+</code></pre></div></div>
+
+<p>读取指定System文件并将结果输出的到指定路径：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>AppCompatCacheParser.exe --csv c:\test -h C:\Windows\System32\config\SYSTEM
+</code></pre></div></div>
+
+<p>(2)</p>
+
+<p>源代码开源(python)</p>
+
+<p>如果想要先导出注册表文件，然后在另一系统中获得解析结果，可使用python实现的脚本：</p>
+
+<p>https://github.com/mandiant/ShimCacheParser</p>
+
+<p>用法示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg export "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache" ShimCache.reg
+ShimCacheParser.py -o out.csv -r c:\test\ShimCache.reg -t
+</code></pre></div></div>
+
+<p>通过System文件导出结果：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ShimCacheParser.py -o out.csv -i C:\Windows\System32\config\SYSTEM -t
+</code></pre></div></div>
+
+<h4 id="清除记录的方法-1">清除记录的方法</h4>
+
+<p>ShimCache只会在系统重新启动后更新(注销当前用户不会更新)</p>
+
+<p>也就是说，想要清除本次系统从启动至关机的ShimCache记录，有两种方法：</p>
+
+<p>(1)修改注册表</p>
+
+<p>备份当前注册表：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg export "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache" ShimCache.reg
+</code></pre></div></div>
+
+<p>系统重启后，恢复注册表：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg import ShimCache.reg
+</code></pre></div></div>
+
+<p>(2)非正常关机</p>
+
+<p>跳过写入注册表的操作，无法记录本次系统自启动至关机的记录</p>
+
+<p>(3)修改内存</p>
+
+<p>(理论上可行)</p>
+
+<h3 id="2userassist">2、UserAssist</h3>
+
+<p>参考资料：</p>
+
+<p>https://www.4n6k.com/2013/05/userassist-forensics-timelines.html</p>
+
+<p>可以用来记录Windows系统程序执行的次数和最后一次执行时间</p>
+
+<p>位置：</p>
+
+<p>当前用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist
+</code></pre></div></div>
+
+<p>所有用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKEY_USERS\&lt;sid&gt;\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist
+</code></pre></div></div>
+
+<p>子健的名称使用ROT-13加密(解密比较简单)</p>
+
+<p>记录实时更新</p>
+
+<h4 id="解析工具-1">解析工具</h4>
+
+<p>(1)</p>
+
+<p>命令行解析</p>
+
+<p>https://www.nirsoft.net/utils/userassist_view.html</p>
+
+<p>用法示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>UserAssistView.exe  /stext out.txt
+</code></pre></div></div>
+
+<p>(2)</p>
+
+<p>源代码开源(c#)</p>
+
+<p>https://blog.didierstevens.com/programs/userassist/</p>
+
+<h4 id="清除记录的方法-2">清除记录的方法</h4>
+
+<p>清除对应的注册表键值</p>
+
+<h3 id="3muicache">3、MUICache</h3>
+
+<p>参考资料：</p>
+
+<p>http://what-when-how.com/windows-forensic-analysis/registry-analysis-windows-forensic-analysis-part-8/</p>
+
+<p>用来记录exe文件的文件名称，在注册表中保存exe文件的绝对路径和对应exe文件的文件名称</p>
+
+<p>位置：</p>
+
+<p>当前用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache
+</code></pre></div></div>
+
+<p>所有用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKEY_USERS\&lt;sid&gt;\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache
+</code></pre></div></div>
+
+<p>数据未加密</p>
+
+<p>记录实时更新</p>
+
+<h4 id="解析工具-2">解析工具</h4>
+
+<p>(1)</p>
+
+<p>命令行解析</p>
+
+<p>http://www.nirsoft.net/utils/muicache_view.html</p>
+
+<p>用法示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MUICacheView.exe  /stext out.txt
+</code></pre></div></div>
+
+<p>(2)直接查询注册表</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg query "HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
+</code></pre></div></div>
+
+<h4 id="清除记录的方法-3">清除记录的方法</h4>
+
+<p>清除对应的注册表键值</p>
+
+<h3 id="4runmru">4、RunMRU</h3>
+
+<p>参考资料：</p>
+
+<p>http://www.forensicfocus.com/a-forensic-analysis-of-the-windows-registry</p>
+
+<p>保存输入Win+U启动程序的历史记录</p>
+
+<p>位置：</p>
+
+<p>当前用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU
+</code></pre></div></div>
+
+<p>所有用户：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKEY_USERS\&lt;sid&gt;\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU
+</code></pre></div></div>
+
+<p>数据未加密</p>
+
+<p>记录实时更新</p>
+
+<h4 id="解析工具-3">解析工具</h4>
+
+<p>(1)直接查询注册表</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg query "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"
+</code></pre></div></div>
+
+<h4 id="清除记录的方法-4">清除记录的方法</h4>
+
+<p>清除对应的注册表键值</p>
+
+<h3 id="5appcompatflags-registry-keys">5、AppCompatFlags Registry Keys</h3>
+
+<p>参考资料：</p>
+
+<p>https://journeyintoir.blogspot.com/2013/12/revealing-program-compatibility.html</p>
+
+<p>保存程序执行记录</p>
+
+<p>位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HKLM\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers
+HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers
+HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Persisted
+HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store
+</code></pre></div></div>
+
+<h4 id="解析工具-4">解析工具</h4>
+
+<p>(1)直接查询注册表</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg query "HKLM\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+reg query "HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+reg query "HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Persisted"
+reg query "HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"
+</code></pre></div></div>
+
+<h4 id="清除记录的方法-5">清除记录的方法</h4>
+
+<p>清除对应的注册表键值</p>
+
+<h2 id="0x04-从文件获得文件执行记录">0x04 从文件获得文件执行记录</h2>
+<hr>
+
+<h3 id="1prefetch">1、Prefetch</h3>
+
+<p>参考资料：</p>
+
+<p>https://www.forensicmag.com/article/2010/12/decoding-prefetch-files-forensic-purposes-part-1</p>
+
+<p>预读取文件夹，用来存放系统已访问过文件的预读信息，能够加快系统的启动速度</p>
+
+<p>记录文件运行次数、上次执行时间、Hash等</p>
+
+<p>查看该功能是否开启：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg query "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" /v EnablePrefetcher
+</code></pre></div></div>
+
+<ul>
+  <li>0 = Disabled</li>
+  <li>1 = Only Application launch prefetching enabled</li>
+  <li>2 = Only Boot prefetching enabled</li>
+  <li>3 = Both Application launch and Boot prefetching enabled</li>
+</ul>
+
+<p>位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\Prefetch
+</code></pre></div></div>
+
+<p>数据以固定格式保存，扩展名为pf</p>
+
+<h4 id="解析工具-5">解析工具</h4>
+
+<p>(1)</p>
+
+<p>命令行解析</p>
+
+<p>源代码开源(c#)</p>
+
+<p>https://github.com/EricZimmerman/PECmd</p>
+
+<p>用法示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PECmd.exe -d C:\Windows\Prefetch --csv c:\temp
+</code></pre></div></div>
+
+<p>生成两个文件”time”_PECmd_Output.csv和”time”_PECmd_Output_Timeline.csv</p>
+
+<p>“time”_PECmd_Output.csv保存详细信息</p>
+
+<p>“time”_PECmd_Output_Timeline.csv只保存文件的名称列表</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PECmd.exe -d C:\Windows\Prefetch --json c:\temp
+</code></pre></div></div>
+
+<p>生成多个json文件，每个pf文件对应一个json文件</p>
+
+<h4 id="清除记录的方法-6">清除记录的方法</h4>
+
+<p>删除对应文件名的pf文件</p>
+
+<h3 id="2amcache">2、Amcache</h3>
+
+<p>参考资料：</p>
+
+<p>https://journeyintoir.blogspot.com/2013/12/revealing-recentfilecachebcf-file.html</p>
+
+<p>http://www.swiftforensics.com/2013/12/amcachehve-in-windows-8-goldmine-for.html</p>
+
+<p>用来跟踪应用程序与不同可执行文件的兼容性问题</p>
+
+<p>数据以固定格式保存</p>
+
+<p>位置：</p>
+
+<p>Win7：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\AppCompat\Programs\RecentFileCache.bcf
+</code></pre></div></div>
+
+<p>只记录文件名称</p>
+
+<p>Win8及以上：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\AppCompat\Programs\Amcache.hve
+</code></pre></div></div>
+
+<p>记录创建时间、上次修改时间、SHA1和一些PE文件头信息</p>
+
+<p><strong>注：</strong></p>
+
+<p>Win7系统安装KB2952664后，也会支持Amcache.hve，也就是说，RecentFileCache.bcf和Amcache.hve都包含文件执行记录</p>
+
+<h4 id="解析工具recentfilecachebcf">解析工具(RecentFileCache.bcf)</h4>
+
+<p>(1)</p>
+
+<p>源代码开源(c#)</p>
+
+<p>https://github.com/jwhwan9/dumpBCF</p>
+
+<p>(2)</p>
+
+<p>源代码开源(python)</p>
+
+<p>https://github.com/prolsen/recentfilecache-parser</p>
+
+<p>用法示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rfcparse.py -f C:\Windows\AppCompat\Programs\RecentFileCache.bcf
+</code></pre></div></div>
+
+<h4 id="解析工具amcachehve">解析工具(Amcache.hve)</h4>
+
+<p>(1)</p>
+
+<p>命令行解析</p>
+
+<p>源代码开源(c#)</p>
+
+<p>https://github.com/EricZimmerman/AmcacheParser</p>
+
+<p>用法示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>AmcacheParser.exe -f C:\Windows\AppCompat\Programs\Amcache.hve --csv c:\test
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>某些情况下会无法导出，提示系统正在占用文件Amcache.hve</p>
+
+<p>(2)</p>
+
+<p>源代码开源(python)</p>
+
+<p>https://github.com/williballenthin/python-registry/blob/master/samples/amcache.py</p>
+
+<p>(3)</p>
+
+<p>源代码开源(powershell)</p>
+
+<p>https://github.com/yoda66/GetAmCache/blob/master/Get-Amcache.ps1</p>
+
+<h4 id="清除记录的方法recentfilecachebcf">清除记录的方法(RecentFileCache.bcf)</h4>
+
+<p>修改文件</p>
+
+<p>详细方法将在下篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-RecentFileCache.bcf%E5%92%8CAmcache.hve%E5%8D%95%E6%9D%A1%E8%AE%B0%E5%BD%95%E7%9A%84%E6%B8%85%E9%99%A4/">《渗透技巧——RecentFileCache.bcf和Amcache.hve单条记录的清除》</a>介绍</p>
+
+<h4 id="清除记录的方法amcachehve">清除记录的方法(Amcache.hve)</h4>
+
+<p>修改文件</p>
+
+<p>详细方法将在下篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-RecentFileCache.bcf%E5%92%8CAmcache.hve%E5%8D%95%E6%9D%A1%E8%AE%B0%E5%BD%95%E7%9A%84%E6%B8%85%E9%99%A4/">《渗透技巧——RecentFileCache.bcf和Amcache.hve单条记录的清除》</a>介绍</p>
+
+<h3 id="3jumplists">3、JumpLists</h3>
+
+<p>参考资料：</p>
+
+<p>https://articles.forensicfocus.com/2012/10/30/forensic-analysis-of-windows-7-jump-lists/</p>
+
+<p>用来记录用户最近使用的文档和应用程序，通常显示在任务栏中</p>
+
+<p>位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>%APPDATA%\Microsoft\Windows\Recent
+</code></pre></div></div>
+
+<p>数据未加密</p>
+
+<p>记录实时更新</p>
+
+<h4 id="解析工具-6">解析工具</h4>
+
+<p>(1)</p>
+
+<p>直接查询文件夹</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dir %APPDATA%\Microsoft\Windows\Recent
+</code></pre></div></div>
+
+<h4 id="清除记录的方法-7">清除记录的方法</h4>
+
+<p>清除路径下的文件</p>
+
+<h3 id="4srum">4、SRUM</h3>
+
+<p>Win8及以上系统支持</p>
+
+<p>参考资料：</p>
+
+<p>https://www.sans.org/cyber-security-summit/archives/file/summit-archive-1492184583.pdf</p>
+
+<p>包括多种信息，其中包括程序执行时间</p>
+
+<p>数据加密</p>
+
+<p>记录实时更新</p>
+
+<h4 id="解析工具-7">解析工具</h4>
+
+<p>(1)</p>
+
+<p>命令行解析</p>
+
+<p>源代码开源(python)</p>
+
+<p>https://github.com/MarkBaggett/srum-dump</p>
+
+<p>用法示例：</p>
+
+<p>需要模板文件SRUM_TEMPLATE.xlsx</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>srum_dump.exe --SRUM_INFILE c:\Windows\system32\sru\SRUDB.dat
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>我在测试的过程中发现上面的命令有问题，执行失败，提示<code class="language-plaintext highlighter-rouge">ESE File Not found: C:\Windows\System32\sru\SRUDB.dat</code></p>
+
+<p>需要将SRUDB.dat复制到另一目录，再进行解析</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>srum_dump.exe --SRUM_INFILE SRUDB.dat
+</code></pre></div></div>
+
+<h4 id="清除记录的方法-8">清除记录的方法</h4>
+
+<p>(留在以后介绍)</p>
+
+<h2 id="0x05-防御建议">0x05 防御建议</h2>
+<hr>
+
+<p>不同系统支持不同方法，如下图：</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-10-14/4-1.png" alt="Alt text"></p>
+
+<p>图片截取自https://1234n6-my.sharepoint.com/:x:/p/adam/EU3Fk3ec6NdPsSQx1eA1sfwB_R_fRa4tJ4c1FR6WJlWIEA?e=GRyu7r</p>
+
+<p>站在防御的角度，可以选择定期清理系统中的文件执行记录</p>
+
+<p>站在取证的角度，攻击者能够对文件执行记录进行修改和删除，所以对这些记录不能盲目相信</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文对Windows主机(Win7及以上系统)常见文件执行记录的位置进行整理，通过实际测试验证了Windows系统可记录的内容，分析了部分记录的清除方法。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on October 30, 2018
+  </div>
+
+  
+</article>

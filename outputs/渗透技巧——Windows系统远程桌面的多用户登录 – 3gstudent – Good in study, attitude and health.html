@@ -1,0 +1,314 @@
+<article class="post">
+  <h1>渗透技巧——Windows系统远程桌面的多用户登录</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试中，经常会接触Windows服务器的远程桌面服务，通过界面对服务器进行管理。而对于普通的Windows系统，在某些条件下也需要进行界面操作。</p>
+
+<p>虽然我们可以通过编写程序来实现界面操作（捕获桌面信息，压缩传输，发送鼠标键盘消息等），但是如果能够使用远程桌面服务，岂不是更加方便高效</p>
+
+<p>那么，对应非服务器版本的Windows系统，在使用远程桌面服务有哪些需要注意的问题呢，本文将会逐个分析介绍。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍如下内容：</p>
+
+<ul>
+  <li>开启远程桌面的方法</li>
+  <li>使用mimikatz支持远程桌面多用户的原理</li>
+  <li>改进思路</li>
+  <li>测试工具rdpwrap</li>
+</ul>
+
+<h2 id="0x02-开启远程桌面的方法">0x02 开启远程桌面的方法</h2>
+<hr>
+
+<h3 id="1查询系统是否允许3389远程连接">1、查询系统是否允许3389远程连接</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REG QUERY "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections
+</code></pre></div></div>
+
+<p>1表示关闭，0表示开启</p>
+
+<p>查看远程连接的端口：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REG QUERY "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v PortNumber
+</code></pre></div></div>
+
+<p>端口格式为16进制，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/2-1.png" alt="Alt text"></p>
+
+<p><code class="language-plaintext highlighter-rouge">0xd3d</code>转换为十进制为<code class="language-plaintext highlighter-rouge">33389</code></p>
+
+<h3 id="2本机开启3389远程连接的方法">2、本机开启3389远程连接的方法</h3>
+
+<h4 id="方法1通过cmd">方法1：通过cmd</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REG ADD "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 00000000 /f
+REG ADD "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v PortNumber /t REG_DWORD /d 0x00000d3d /f
+</code></pre></div></div>
+
+<h4 id="方法2通过reg文件">方法2：通过reg文件</h4>
+
+<p>内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Windows Registry Editor Version 5.00
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server]
+"fDenyTSConnections"=dword:00000000
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp]
+"PortNumber"=dword:00000d3d
+</code></pre></div></div>
+
+<p>导入注册表：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>regedit /s a.reg
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>如果修改连接端口，系统重启后才能生效</p>
+
+<p><strong>补充</strong></p>
+
+<p>如果系统未配置过远程桌面服务，第一次开启时还需要添加防火墙规则允许3389端口，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/2-2.png" alt="Alt text"></p>
+
+<p>修改防火墙配置，允许3389端口的命令如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>netsh advfirewall firewall add rule name="Remote Desktop" protocol=TCP dir=in localport=3389 action=allow
+</code></pre></div></div>
+
+<h3 id="3远程连接方法">3、远程连接方法</h3>
+
+<p>kali使用3389远程连接：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rdesktop 192.168.1.1:3389
+</code></pre></div></div>
+
+<p>Windows：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mstsc.exe
+</code></pre></div></div>
+
+<h2 id="0x03-非服务器版本的windows系统默认只允许一个账户登录">0x03 非服务器版本的Windows系统默认只允许一个账户登录</h2>
+<hr>
+
+<p>具体表现为：</p>
+
+<p>远程登录时，使用与原系统相同的账户，原系统将被切换到登录界面</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/3-1.png" alt="Alt text"></p>
+
+<p>使用不同的账户，登录时提示其他用户已登录到此计算机，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/3-2.png" alt="Alt text"></p>
+
+<p>选择继续后，原系统桌面将弹框提示是否断开当前连接(30秒后默认选择同意，退回到登录界面)</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/3-3.png" alt="Alt text"></p>
+
+<h2 id="0x04--非服务器版本的windows系统支持多用户登录的方法">0x04  非服务器版本的Windows系统支持多用户登录的方法</h2>
+<hr>
+
+<h3 id="1使用mimikatz">1、使用mimikatz</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>privilege::debug
+ts::multirdp
+</code></pre></div></div>
+
+<p>执行如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/4-1.png" alt="Alt text"></p>
+
+<p>开启多用户登录功能，最高支持到Win7</p>
+
+<p><strong>使用与原系统相同的账户，原系统还是会被切换到登录界面</strong></p>
+
+<p>使用与原系统不同的账户，登录成功，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/4-2.png" alt="Alt text"></p>
+
+<p>通过查看mimikatz的源码找到修改思路，代码位置如下：</p>
+
+<p>https://github.com/gentilkiwi/mimikatz/blob/master/mimikatz/modules/kuhl_m_ts.c</p>
+
+<p>Windows在开启服务Remote Desktop Services时，会加载termsrv.dll，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/4-3.png" alt="Alt text"></p>
+
+<p>通过修改内存中的termsrv.dll实现开启多用户功能，具体操作如下：</p>
+
+<p>Win7 x86：</p>
+
+<p>查找:<code class="language-plaintext highlighter-rouge">0x3B86200300000F84</code></p>
+
+<p>替换为:<code class="language-plaintext highlighter-rouge">0xC78620030000FFFFFF7F9090</code></p>
+
+<p>Win7 x64：</p>
+
+<p>查找:<code class="language-plaintext highlighter-rouge">0x39873C0600000F84</code></p>
+
+<p>替换为:<code class="language-plaintext highlighter-rouge">0xC7873C060000FFFFFF7F9090</code></p>
+
+<p>当然，该方法在系统重启后失效</p>
+
+<p>更近一步，如果我们直接修改文件termsrv.dll，能否实现永久开启多用户登录的功能呢？</p>
+
+<p>继续接下来的测试</p>
+
+<h3 id="2修改termsrvdll">2、修改termsrv.dll</h3>
+
+<p>推荐工具： <code class="language-plaintext highlighter-rouge">CFF Explorer</code></p>
+
+<p>测试系统： Win7 x64</p>
+
+<p>打开<code class="language-plaintext highlighter-rouge">c：\windows\system32</code>下的termsrv.dll</p>
+
+<p>Hex Editor</p>
+
+<p>查看十六进制数据<code class="language-plaintext highlighter-rouge">39873C0600000F84</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/4-4.png" alt="Alt text"></p>
+
+<p>从<code class="language-plaintext highlighter-rouge">0x0001738A</code>处开始，选中12字节，替换为<code class="language-plaintext highlighter-rouge">C7873C060000FFFFFF7F9090</code></p>
+
+<p>保存dll</p>
+
+<p><strong>注：</strong></p>
+
+<p>需要先停止远程桌面服务才能替换termsrv.dll</p>
+
+<p>替换termsrv.dll后，重新开启服务TermService</p>
+
+<p>尝试使用不同用户远程连接，成功，验证该思路正确</p>
+
+<p>完整操作如下：</p>
+
+<p>1.查看Remote Desktop Services服务状态</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sc qc TermService
+</code></pre></div></div>
+
+<p>2.如果服务启动，需要先关闭</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>net stop TermService /y
+</code></pre></div></div>
+
+<p>3.删除原termsrv.dll</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>del c:\windows\system32\termsrv.dll
+</code></pre></div></div>
+
+<p>4.替换新termsrv.dll</p>
+
+<p>5.启动服务</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>net start TermService
+</code></pre></div></div>
+
+<p>6.远程连接</p>
+
+<p>成功实现多用户登录</p>
+
+<p><strong>补充1：</strong></p>
+
+<p>Win7 x86：</p>
+
+<p>查找:<code class="language-plaintext highlighter-rouge">0x3B86200300000F84</code></p>
+
+<p>替换为:<code class="language-plaintext highlighter-rouge">0xC78620030000FFFFFF7F9090</code></p>
+
+<p><strong>补充2</strong></p>
+
+<p>常见Windows系统的版本号：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>系统</th>
+      <th>版本号</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Win7</td>
+      <td>6.1.7600</td>
+    </tr>
+    <tr>
+      <td>Win7sp1</td>
+      <td>6.1.7601</td>
+    </tr>
+    <tr>
+      <td>Win8</td>
+      <td>6.2.9200</td>
+    </tr>
+    <tr>
+      <td>Win8.1</td>
+      <td>6.3.9600</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="3使用工具rdpwrap">3、使用工具rdpwrap</h3>
+
+<p>工程地址：</p>
+
+<p>https://github.com/stascorp/rdpwrap</p>
+
+<p>工具地址：</p>
+
+<p>https://github.com/stascorp/rdpwrap/releases</p>
+
+<p>支持Win Vista - Win 10</p>
+
+<p>不修改termsrv.dll，通过传入不同参数实现</p>
+
+<p>安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>RDPWInst.exe -i is
+</code></pre></div></div>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-1/5-1.png" alt="Alt text"></p>
+
+<p>释放rdpwrap.dll和rdpwrap.ini至System32文件夹</p>
+
+<p>rdpwrap.dll会被加载到同termsrv.dll相同的进程</p>
+
+<p>此时，能够使用不同用户进行远程连接</p>
+
+<p>卸载：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>RDPWInst.exe -u
+</code></pre></div></div>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文介绍了三种支持远程桌面多用户登录的方法，适用于不同条件，对于替换termsrv.dll的方法，需要根据系统具体版本，使用不同的替换位置</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on November  1, 2017
+  </div>
+
+  
+</article>

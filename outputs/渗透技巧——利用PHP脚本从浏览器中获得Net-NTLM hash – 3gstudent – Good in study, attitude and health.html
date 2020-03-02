@@ -1,0 +1,258 @@
+<article class="post">
+  <h1>渗透技巧——利用PHP脚本从浏览器中获得Net-NTLM hash</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E9%80%9A%E8%BF%87HTTP%E5%8D%8F%E8%AE%AE%E8%8E%B7%E5%BE%97Net-NTLM-hash/">《渗透技巧——通过HTTP协议获得Net-NTLM hash》</a>介绍了通过HTTP协议获得客户端当前登录用户Net-NTLM hash的方法，侧重于介绍原理和思路，本文将要给出一个具体的实现方法，利用PHP脚本模拟Net-NTLM认证过程，提取出客户端的Net-NTLM hash</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>Net-NTLM认证过程</li>
+  <li>利用PHP脚本模拟认证过程</li>
+  <li>脚本编写细节</li>
+  <li>实际测试</li>
+</ul>
+
+<h2 id="0x02-net-ntlm认证过程">0x02 Net-NTLM认证过程</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://www.innovation.ch/personal/ronald/ntlm.html</p>
+
+<p>依然使用这幅图，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/2-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>图片截取自https://www.innovation.ch/personal/ronald/ntlm.html</p>
+
+<h2 id="0x03-利用php脚本模拟认证过程">0x03 利用PHP脚本模拟认证过程</h2>
+<hr>
+
+<p>想要通过PHP脚本模拟Net-NTLM认证过程，主要考虑的是Server端的实现</p>
+
+<h3 id="1发送www-authenticate-ntlm">1、发送<code class="language-plaintext highlighter-rouge">WWW-Authenticate: NTLM</code></h3>
+
+<p>接收Client的GET请求，回复<code class="language-plaintext highlighter-rouge">401 Unauthorized WWW-Authenticate: NTLM</code>，提示Client需要NTLM认证</p>
+
+<h3 id="2发送www-authenticate-ntlm-base64-encoded-type-2-message">2、发送<code class="language-plaintext highlighter-rouge">WWW-Authenticate: NTLM &lt;base64-encoded type-2-message&gt;</code></h3>
+
+<p>接收Client的<code class="language-plaintext highlighter-rouge">Type-1-Message</code>，回复<code class="language-plaintext highlighter-rouge">Type-2-message</code></p>
+
+<p>The Type 2 Message的结构如下：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Offset</th>
+      <th style="text-align: center">Description</th>
+      <th style="text-align: right">Content</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>0</td>
+      <td style="text-align: center">NTLMSSP Signature</td>
+      <td style="text-align: right">Null-terminated ASCII “NTLMSSP” (0x4e544c4d53535000)</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td style="text-align: center">NTLM Message Type</td>
+      <td style="text-align: right">long (0x02000000)</td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td style="text-align: center">Target Name</td>
+      <td style="text-align: right">security buffer</td>
+    </tr>
+    <tr>
+      <td>20</td>
+      <td style="text-align: center">Flags</td>
+      <td style="text-align: right">long</td>
+    </tr>
+    <tr>
+      <td>24</td>
+      <td style="text-align: center">Challenge</td>
+      <td style="text-align: right">8 bytes</td>
+    </tr>
+    <tr>
+      <td>(32)</td>
+      <td style="text-align: center">Context (optional)</td>
+      <td style="text-align: right">8 bytes (two consecutive longs)</td>
+    </tr>
+    <tr>
+      <td>(40)</td>
+      <td style="text-align: center">Target Information (optional)</td>
+      <td style="text-align: right">security buffer</td>
+    </tr>
+    <tr>
+      <td>(48)</td>
+      <td style="text-align: center">OS Version Structure (Optional)</td>
+      <td style="text-align: right">8 bytes</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>详细参数说明可参考：</p>
+
+<p>http://davenport.sourceforge.net/ntlm.html#theType2Message</p>
+
+<p>值得注意的参数为<code class="language-plaintext highlighter-rouge">Flags</code>和<code class="language-plaintext highlighter-rouge">Challenge</code></p>
+
+<p>Challenge是使用hashcat破解Net-NTLM hash的必须参数</p>
+
+<p>Flags包含多种类型，一个简单的Flags示例，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/2-2.png" alt="Alt text"></p>
+
+<p>对应的数据格式如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/2-4.png" alt="Alt text"></p>
+
+<h3 id="3解析type-3-message">3、解析Type-3-message</h3>
+
+<p>Type-3-message包含Client加密后的Net-NTLM hash消息，提取出对应格式的数据可用于破解</p>
+
+<p>Type-3-message示例如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/2-3.png" alt="Alt text"></p>
+
+<p>这里需要注意每个参数的存储格式</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>short   Length;
+short   Maxlen;
+short   Offset;
+</code></pre></div></div>
+
+<p>Offset对应参数具体内容的偏移地址</p>
+
+<h3 id="4发送网页内容">4、发送网页内容</h3>
+
+<p>Server向Client提供最终的请求内容</p>
+
+<h2 id="0x04-脚本编写细节">0x04 脚本编写细节</h2>
+<hr>
+
+<p>为了便于测试，不会对用户提交的凭据做验证，直接在HTTP的回复内容中返回用户的验证凭据</p>
+
+<p>完整POC代码已开源，地址如下：</p>
+
+<p>https://raw.githubusercontent.com/3gstudent/Writeup/master/catchyournetntlm.php</p>
+
+<p>POC代码基于https://loune.net/2007/10/simple-lightweight-ntlm-in-php/</p>
+
+<p>做了以下优化：</p>
+
+<h4 id="1不再局限于apache-module">1、不再局限于apache module</h4>
+
+<p>原脚本只能在apache下使用</p>
+
+<h4 id="2提取net-ntlm-hash">2、提取Net-NTLM hash</h4>
+
+<p>原脚本输出Client的三个属性： <code class="language-plaintext highlighter-rouge">$user</code> <code class="language-plaintext highlighter-rouge">$domain</code> <code class="language-plaintext highlighter-rouge">$workstation</code></p>
+
+<p>新脚本添加了文件格式解析的功能，提取出<code class="language-plaintext highlighter-rouge">HMAC-MD5</code>和<code class="language-plaintext highlighter-rouge">blob</code></p>
+
+<p><strong>脚本细节：</strong></p>
+
+<p>原POC中的<code class="language-plaintext highlighter-rouge">function get_msg_str($msg, $start, $unicode = true)</code></p>
+
+<p>在调用<code class="language-plaintext highlighter-rouge">$user = get_msg_str($msg, 36);</code>时，由于之前的Flags指定了<code class="language-plaintext highlighter-rouge">unicode</code>，所以默认执行以下代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>if ($unicode)
+        return str_replace("\0", '', substr($msg, $off, $len));
+</code></pre></div></div>
+
+<p>会自动去除字符串中的<code class="language-plaintext highlighter-rouge">0x00</code></p>
+
+<p>而在提取<code class="language-plaintext highlighter-rouge">HMAC-MD5</code>和<code class="language-plaintext highlighter-rouge">blob</code>时，需要保留<code class="language-plaintext highlighter-rouge">0x00</code>，所以我们要传入参数false，不对字符<code class="language-plaintext highlighter-rouge">0x00</code>进行过滤</p>
+
+<p>具体的代码为：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$Response = get_msg_str($msg, 20,false);
+</code></pre></div></div>
+
+<p>至于<code class="language-plaintext highlighter-rouge">challenge</code>，在脚本中指定为<code class="language-plaintext highlighter-rouge">0x0000000000000000</code>，所以最后拼接hashcat的格式时直接设置为<code class="language-plaintext highlighter-rouge">0x0000000000000000</code>即可</p>
+
+<h2 id="0x05-实际测试">0x05 实际测试</h2>
+<hr>
+
+<h3 id="1本地测试">1、本地测试</h3>
+
+<p><strong>Server：</strong></p>
+
+<p>安装apache环境</p>
+
+<p>简单的配置方法:  安装phpstudy</p>
+
+<p>上传脚本catchyournetntlm.php</p>
+
+<p><strong>Client：</strong></p>
+
+<p>修改IE配置文件，将登录方式修改为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code></p>
+
+<p>对应命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REG ADD "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" /v 1A00 /t REG_DWORD /d 00000000 /f
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>域环境下不需要这个设置</p>
+
+<p>Client访问服务器上的catchyournetntlm.php，服务器获得用户的Net-NTLM hash，提取出固定格式返回至Client</p>
+
+<p>Client显示如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/3-1.png" alt="Alt text"></p>
+
+<p>数据可直接用于hashcat的破解</p>
+
+<h3 id="2在线测试">2、在线测试</h3>
+
+<p>https://evi1cg.me/test.php</p>
+
+<p>服务器使用nginx，未使用apache</p>
+
+<p><strong>注：</strong></p>
+
+<p>nginx下脚本的优化由evilcg完成</p>
+
+<p>Client使用默认登录方法，访问该网址弹出对话框提示输入密码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/4-1.png" alt="Alt text"></p>
+
+<p>任意输入，获得输入内容的Net-NTLM hash，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/4-2.png" alt="Alt text"></p>
+
+<p>将Client的登录方式修改为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code>，访问该网址自动获得Client当前用户的Net-NTLM hash，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-10/4-3.png" alt="Alt text"></p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了利用PHP脚本从浏览器中获得Net-NTLM hash的方法，分享脚本编写细节，实际测试该方法的效果。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on May 10, 2018
+  </div>
+
+  
+</article>

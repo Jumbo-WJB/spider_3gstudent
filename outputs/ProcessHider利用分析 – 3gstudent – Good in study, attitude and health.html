@@ -1,0 +1,266 @@
+<article class="post">
+  <h1>ProcessHider利用分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p><a href="https://github.com/M00nRise/ProcessHider">ProcessHider</a>能够在任务管理器和Process Explorer之类的监视工具中隐藏指定进程，本文将要介绍实现原理，分析代码细节。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>ProcessHider测试</li>
+  <li>ProcessHider的实现原理</li>
+  <li>ProcessHider的代码分析</li>
+  <li>ProcessHider的检测</li>
+</ul>
+
+<h2 id="0x01-简介-1">0x01 简介</h2>
+<hr>
+
+<p>ProcessHider能够在任务管理器和Process Explorer之类的监视工具中隐藏指定进程</p>
+
+<p>地址如下：</p>
+
+<p>https://github.com/M00nRise/ProcessHider</p>
+
+<p>支持以下参数：</p>
+
+<ul>
+  <li>pid</li>
+  <li>进程名</li>
+</ul>
+
+<p>两种启动形式：</p>
+
+<ul>
+  <li>exe</li>
+  <li>powershell</li>
+</ul>
+
+<p>ProcessHider能够自动识别操作系统版本和进程位数，向32位和64位进程分别注入Payload.dll，通过Hook API NtQuerySystemInformation()实现进程隐藏</p>
+
+<p>注入的代码使用Dll反射，地址如下：</p>
+
+<p>https://github.com/stephenfewer/ReflectiveDLLInjection</p>
+
+<p>Hook的代码使用NtHookEngine，地址如下：</p>
+
+<p>https://www.codeproject.com/Articles/21414/Powerful-x86-x64-Mini-Hook-Engine</p>
+
+<p>参数实例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ProcessHider.exe -n "putty.exe" -x "procexp.exe"
+</code></pre></div></div>
+
+<p>能够在procexp.exe中隐藏进程名putty.exe，并且默认针对以下进程进行隐藏：</p>
+
+<ul>
+  <li>Taskmgr.exe</li>
+  <li>powershell.exe</li>
+  <li>procexp.exe</li>
+  <li>procexp64.exe</li>
+  <li>perfmon.exe</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>目前不支持对tasklist.exe的进程隐藏</p>
+
+<p>编译时需要注意的问题：</p>
+
+<p>工程ProcessHider需要编译成32位，不能编译成64位</p>
+
+<p>这是因为工程ProcessHider包含了针对64位进程的识别和利用代码</p>
+
+<h2 id="0x02-processhider的实现原理">0x02 ProcessHider的实现原理</h2>
+<hr>
+
+<p>工程ProcessHider实现流程如下：</p>
+
+<h3 id="1判断当前操作系统版本">1.判断当前操作系统版本</h3>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">isSystem64BitWow()</code></p>
+
+<p>如果是32位系统：</p>
+
+<h4 id="1监控进程列表">(1)监控进程列表</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">LaunchDaemon(InjectAll);</code></p>
+
+<h4 id="2向符合条件的进程注入payloaddll">(2)向符合条件的进程注入Payload.dll</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">reactToProcess((DWORD) pCurrent-&gt;ProcessId, pCurrent-&gt;ImageName.Buffer);</code></p>
+
+<p>注入的代码使用了<a href="https://github.com/stephenfewer/ReflectiveDLLInjection">ReflectiveDLLInjection</a>中的代码</p>
+
+<p>如果是64位系统：</p>
+
+<h4 id="1同级目录下释放文件x64hiderexe用作64位的守护进程">(1)同级目录下释放文件x64Hider.exe，用作64位的守护进程</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">CopyResourceIntoFile(x64filesList[i], MAKEINTRESOURCE(x64resourceIDint[i])</code></p>
+
+<h4 id="2解析命令行参数">(2)解析命令行参数</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">createCommandLine(argc, argv, buffer, MAX_COMMANDLINE_LEN);</code></p>
+
+<h4 id="3启动64位的守护进程x64hiderexe">(3)启动64位的守护进程x64Hider.exe</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">CreateProcessFromLine(buffer,false);</code></p>
+
+<p>传入启动的参数</p>
+
+<p>示例如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>"c:\test\x64Hider.exe" "-n" "putty.exe" "-x" "cmd.exe"
+</code></pre></div></div>
+
+<h4 id="4将payloaddll写入x64hiderexe的进程空间">(4)将Payload.dll写入x64Hider.exe的进程空间</h4>
+
+<p>这个过程不向硬盘写入文件，增加隐蔽性</p>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">WriteDLLsToProcess(pi)</code></p>
+
+<p>x64Hider.exe的功能如下：</p>
+
+<ol>
+  <li>监控64位的进程列表</li>
+  <li>向符合条件的64位进程注入64位的Payload.dll</li>
+</ol>
+
+<h4 id="5监控32位的进程列表">(5)监控32位的进程列表</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">LaunchDaemon(InjectAll);</code></p>
+
+<h4 id="6向符合条件的32位进程注入32位的payloaddll">(6)向符合条件的32位进程注入32位的Payload.dll</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">reactToProcess((DWORD) pCurrent-&gt;ProcessId, pCurrent-&gt;ImageName.Buffer);</code></p>
+
+<p>Payload.dll分别对应工程x64Payload和x86Payload</p>
+
+<p>这是基于ReflectiveDLLInjection实现的dll反射</p>
+
+<p>优点是注入成功后在进程空间不存在dll的名称</p>
+
+<p>流程如下：</p>
+
+<h4 id="1创建互斥量">1.创建互斥量</h4>
+
+<p>对应代码<code class="language-plaintext highlighter-rouge">hMutex = CreateMutex(0, TRUE, NULL);</code></p>
+
+<h4 id="2读取参数">2.读取参数</h4>
+
+<p>如果参数为空，从固定文件<code class="language-plaintext highlighter-rouge">"C:\Program Files\Internet Explorer\mdsint.isf"</code>读取参数</p>
+
+<h4 id="3hook-api-ntquerysysteminformation">3.Hook API NtQuerySystemInformation()</h4>
+
+<p>隐藏进程的代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>NTSTATUS WINAPI HookedNtQuerySystemInformation(
+	__in       SYSTEM_INFORMATION_CLASS SystemInformationClass,
+	__inout    PVOID                    SystemInformation,
+	__in       ULONG                    SystemInformationLength,
+	__out_opt  PULONG                   ReturnLength
+)
+{
+	NTSTATUS status = RealNTQueryFunc(SystemInformationClass,
+		SystemInformation,
+		SystemInformationLength,
+		ReturnLength);
+
+	if (SystemProcessInformation == SystemInformationClass &amp;&amp; NT_SUCCESS(status))
+	{
+		//
+		// Loop through the list of processes
+		//
+
+		PSYSTEM_PROCESS_INFO pCurrent = NULL;
+		PSYSTEM_PROCESS_INFO pNext = (PSYSTEM_PROCESS_INFO)SystemInformation;
+
+		do
+		{
+			pCurrent = pNext;
+			pNext = (PSYSTEM_PROCESS_INFO)((PUCHAR)pCurrent + pCurrent-&gt;NextEntryOffset);
+
+			if (isHiddenProcess((int)pNext-&gt;ProcessId,pNext-&gt;ImageName.Buffer))
+			{
+				if (0 == pNext-&gt;NextEntryOffset)
+				{
+					pCurrent-&gt;NextEntryOffset = 0;
+				}
+				else
+				{
+					pCurrent-&gt;NextEntryOffset += pNext-&gt;NextEntryOffset;
+				}
+
+				pNext = pCurrent;
+			}
+		} while (pCurrent-&gt;NextEntryOffset != 0);
+	}
+
+	return status;
+}
+</code></pre></div></div>
+
+<p>这段代码同SubTee之前开源的代码AppInitGlobalHooks-Mimikatz基本相同</p>
+
+<p>我在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E5%88%A9%E7%94%A8globalAPIhooks%E5%9C%A8Win7%E7%B3%BB%E7%BB%9F%E4%B8%8B%E9%9A%90%E8%97%8F%E8%BF%9B%E7%A8%8B/">《利用globalAPIhooks在Win7系统下隐藏进程》</a>有过介绍</p>
+
+<p>SubTee的Github目前无法访问，但我当时fork了他的代码，地址如下：</p>
+
+<p>https://github.com/3gstudent/AppInitGlobalHooks-Mimikatz/blob/master/AppInitHook/main.cpp#L39</p>
+
+<p>所以说，我们使用之前的代码也能实现相同的功能</p>
+
+<h4 id="1编译dll">1.编译dll</h4>
+
+<p>使用代码：</p>
+
+<p>https://github.com/3gstudent/AppInitGlobalHooks-Mimikatz/</p>
+
+<p>编译生成dll</p>
+
+<h4 id="2注入dll">2.注入dll</h4>
+
+<p>这里可以使用我之前写的dll注入的代码，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/NtCreateThreadEx%20%2B%20LdrLoadDll.cpp</p>
+
+<p>但是需要把<code class="language-plaintext highlighter-rouge">FreeDll()</code>的功能去掉</p>
+
+<p>综上，ProcessHider的实现原理如下：</p>
+
+<p>通过Dll注入来Hook API NtQuerySystemInformation()，实现进程隐藏</p>
+
+<h2 id="0x03-processhider的检测">0x03 ProcessHider的检测</h2>
+<hr>
+
+<p>在检测上主要识别以下行为：</p>
+
+<ul>
+  <li>Dll注入</li>
+  <li>Hook API NtQuerySystemInformation()</li>
+</ul>
+
+<h2 id="0x04-小结">0x04 小结</h2>
+<hr>
+
+<p>本文介绍了ProcessHider的实现原理和代码细节，分析利用思路，给出检测建议。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on January  9, 2020
+  </div>
+
+  
+</article>

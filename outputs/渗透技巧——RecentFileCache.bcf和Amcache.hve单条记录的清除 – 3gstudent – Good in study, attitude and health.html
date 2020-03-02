@@ -1,0 +1,216 @@
+<article class="post">
+  <h1>渗透技巧——RecentFileCache.bcf和Amcache.hve单条记录的清除</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Windows%E7%B3%BB%E7%BB%9F%E6%96%87%E4%BB%B6%E6%89%A7%E8%A1%8C%E8%AE%B0%E5%BD%95%E7%9A%84%E8%8E%B7%E5%8F%96%E4%B8%8E%E6%B8%85%E9%99%A4/">《渗透技巧——Windows系统文件执行记录的获取与清除》</a>对Windows主机(Win7及以上系统)常见文件执行记录的位置进行整理，尝试获取并清除单条记录，分析利用思路，总结防御方法。</p>
+
+<p>本文作为后续，详细介绍RecentFileCache.bcf和Amcache.hve单条记录的清除方法</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<ul>
+  <li>RecentFileCache.bcf格式分析</li>
+  <li>编写程序实现RecentFileCache.bcf的单条记录清除</li>
+  <li>Amcache.hve格式分析</li>
+  <li>编写程序实现Amcache.hve的单条记录清除</li>
+</ul>
+
+<h2 id="0x02-recentfilecachebcf格式分析">0x02 RecentFileCache.bcf格式分析</h2>
+<hr>
+
+<h3 id="简介">简介</h3>
+
+<p>用来跟踪应用程序与不同可执行文件的兼容性问题，能够记录应用程序执行的历史记录</p>
+
+<p>支持Win7(Win8及更高版本的系统不支持)，位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\AppCompat\Programs\RecentFileCache.bcf
+</code></pre></div></div>
+
+<h3 id="格式分析">格式分析</h3>
+
+<p>没有找到介绍RecentFileCache.bcf文件格式的资料，但好在格式的规律比较简单</p>
+
+<p>前20字节为文件头部(header)</p>
+
+<p>前16字节为固定格式，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-7/2-1.png" alt="Alt text"></p>
+
+<p>接下来是每条记录的内容，固定格式如下：</p>
+
+<ul>
+  <li>前4字节表示Unicode记录的长度</li>
+  <li>记录的内容(Unicode格式)</li>
+  <li>结束标志，0x0000</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>Unicode每个字符占用2个字节</p>
+
+<p>下面使用c程序实现RecentFileCache.bcf文件的解析</p>
+
+<p>定义结构体</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>typedef struct _BCF_HEADER {
+	ULONG64 Flag1;
+	ULONG64 Flag2;
+	ULONG Unknown;
+} BCFHEADER, *PBCFHEADER;
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>typedef struct _BCF_RECORD {
+	ULONG Size;
+} BCFRECORD, *PBCFRECORD;
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>ULONG64为8字节，ULONG为4字节</p>
+
+<p>逐个解析每条记录，通过固定变量Size确定记录长度，进而读取每条记录的内容</p>
+
+<p>完整实现代码已开源，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/ListRecentFileCache.cpp</p>
+
+<p>代码实现了读取RecentFileCache.bcf文件并显示所有记录</p>
+
+<h2 id="0x03-recentfilecachebcf文件的单条记录清除">0x03 RecentFileCache.bcf文件的单条记录清除</h2>
+<hr>
+
+<p>最简单的方法是将待删除的记录用字符<code class="language-plaintext highlighter-rouge">0x00</code>覆盖，但是会打乱原有的文件格式</p>
+
+<p>所以这里需要将待删除的记录内容删除，后续的记录补齐空位</p>
+
+<p>在程序实现上，使用新的数组来存储修改后的内容</p>
+
+<p>完整实现代码已开源，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/DeleteRecentFileCache.cpp</p>
+
+<p>代码实现了修改指定的RecentFileCache.bcf文件，删除指定的记录，新文件保存为NewRecentFileCache.bcf</p>
+
+<h2 id="0x04-amcachehve格式分析">0x04 Amcache.hve格式分析</h2>
+<hr>
+
+<h3 id="简介-1">简介</h3>
+
+<p>Windows系统使用Amcache.hve替换RecentFileCache.bcf，能够记录创建时间、上次修改时间、SHA1和一些PE文件头信息</p>
+
+<p>Win8及更高版本的系统使用Amcache.hve替代RecentFileCache.bcf</p>
+
+<p>Win7安装KB2952664后，也会支持Amcache.hve，也就是说，此时RecentFileCache.bcf和Amcache.hve都包含文件执行记录</p>
+
+<p>Amcache.hve采用注册表格式存储信息</p>
+
+<p>注册表文件的格式可参考：</p>
+
+<p>http://www.sentinelchicken.com/data/TheWindowsNTRegistryFileFormat.pdf</p>
+
+<p>附录部分包括详细的文件格式介绍，可为程序实现提供参考</p>
+
+<p>为了提高开发效率，对记录的解析我们可以借助Windows系统下的regedit.exe</p>
+
+<p>通过regedit.exe加载Amcache.hve，即可查看和修改Amcache.hve的信息，方法如下：</p>
+
+<p>选择<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE</code>，选择<code class="language-plaintext highlighter-rouge">File</code> -&gt; <code class="language-plaintext highlighter-rouge">Load Hive...</code>，指定名称，即可加载Amcache.hve</p>
+
+<p>查看注册表后发现，文件执行记录以明文保存</p>
+
+<p>修改regedit.exe中Amcache.hve的注册表信息，需要使用System权限，修改后再选择Export，即可实现对Amcache.hve的保存</p>
+
+<p>查看Amcache.hve文件记录的开源powershell脚本，地址如下：</p>
+
+<p>https://github.com/yoda66/GetAmCache/blob/master/Get-Amcache.ps1</p>
+
+<p>脚本流程如下：</p>
+
+<ul>
+  <li>通过reg load加载Amcache.hve</li>
+  <li>枚举注册表，显示记录信息</li>
+  <li>通过reg unload卸载Amcache.hve</li>
+</ul>
+
+<h2 id="0x05-amcachehve文件的单条记录清除">0x05 Amcache.hve文件的单条记录清除</h2>
+<hr>
+
+<h3 id="删除思路">删除思路</h3>
+
+<p>删除指定记录的信息，需要删除该记录对应的注册表父项</p>
+
+<h3 id="删除方法">删除方法</h3>
+
+<h4 id="1通过regeditexe的界面操作">1、通过regedit.exe的界面操作</h4>
+
+<p>以System权限打开regedit.exe，加载Amcache.hve，编辑注册表，最后选择Export导出新的Amcache.hve</p>
+
+<h4 id="2脚本实现">2、脚本实现</h4>
+
+<p>流程如下：</p>
+
+<ul>
+  <li>以system权限通过reg load加载Amcache.hve</li>
+  <li>枚举注册表，匹配待删除的记录</li>
+  <li>获得记录的注册表父项，删除整个注册表键值</li>
+  <li>导出注册表，保存Amcache.hve</li>
+  <li>通过reg unload卸载Amcache.hve</li>
+</ul>
+
+<p>脚本实现的细节：</p>
+
+<p>判断当前权限是不是system：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$output = &amp;"whoami"
+if($output -notmatch "nt authority\\system")
+{
+	Write-Error "Script must be run as nt authority\system" -ErrorAction Stop
+}
+</code></pre></div></div>
+
+<p>加载注册表：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg load HKLM\amcache c:\Windows\AppCompat\Programs\Amcache.hve
+</code></pre></div></div>
+
+<p>导出注册表：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg.exe save HKLM\amcache "new.hve" /y
+</code></pre></div></div>
+
+<p>卸载注册表：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg.exe unload HKLM\amcache
+</code></pre></div></div>
+
+<p>完整实现代码已开源，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-Powershell/blob/master/Delete-Amcache.ps1</p>
+
+<p>代码实现了删除指定名称的记录，并且能够自动删除多条重复的记录，最终生成新文件new.hve</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了RecentFileCache.bcf和Amcache.hve单条记录的清除方法和程序实现细节。</p>
+
+<p>站在取证的角度，对于RecentFileCache.bcf和Amcache.hve的记录，不能盲目相信</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on November  7, 2018
+  </div>
+
+  
+</article>

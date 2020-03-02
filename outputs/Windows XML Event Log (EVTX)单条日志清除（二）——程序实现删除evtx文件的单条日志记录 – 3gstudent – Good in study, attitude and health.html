@@ -1,0 +1,259 @@
+<article class="post">
+  <h1>Windows XML Event Log (EVTX)单条日志清除（二）——程序实现删除evtx文件的单条日志记录</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Windows XML Event Log (EVTX)单条日志清除系列文章的第二篇，介绍对指定evtx文件的单条日志删除方法，解决在程序设计上需要考虑的多个问题，开源实现代码。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>对指定evtx文件单条日志的删除思路</li>
+  <li>程序实现细节</li>
+  <li>开源代码</li>
+</ul>
+
+<h2 id="0x02-对指定evtx文件单条日志的删除思路">0x02 对指定evtx文件单条日志的删除思路</h2>
+<hr>
+
+<p>在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%B8%80-%E5%88%A0%E9%99%A4%E6%80%9D%E8%B7%AF%E4%B8%8E%E5%AE%9E%E4%BE%8B/">《Windows XML Event Log (EVTX)单条日志清除（一）——删除思路与实例》</a>介绍了evtx日志文件中删除单条日志的原理和一个实例，采用修改日志长度的方法实现日志删除</p>
+
+<p>实现思路如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-2/2-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>图片来自https://blog.fox-it.com/2017/12/08/detection-and-recovery-of-nsas-covered-up-tracks/</p>
+
+<p>这种方法在实现上相对简单，但是需要考虑多种不同的情况：</p>
+
+<ol>
+  <li>删除中间日志</li>
+  <li>删除最后一条日志</li>
+  <li>删除第一条日志</li>
+</ol>
+
+<h2 id="0x03-删除中间日志">0x03 删除中间日志</h2>
+<hr>
+
+<p>方法如下：</p>
+
+<ol>
+  <li>File header中的Next record identifier值减1</li>
+  <li>重新计算File header中的Checksum</li>
+  <li>重新计算前一日志长度，共2个位置(偏移4和当前日志的最后4字节)</li>
+  <li>后续日志的Event record identifier依次减1</li>
+  <li>ElfChuk中的Last event record number减1</li>
+  <li>ElfChuk中的Last event record identifier减1</li>
+  <li>重新计算ElfChuk中Event records checksum</li>
+  <li>重新计算ElfChuk中Checksum</li>
+</ol>
+
+<p>在程序实现上，具体细节如下：</p>
+
+<h3 id="1file-header中的next-record-identifier值减1">1、File header中的Next record identifier值减1</h3>
+
+<p>读取日志文件内容</p>
+
+<p>定义日志文件格式结构体，对日志文件格式进行解析</p>
+
+<p>Next record identifier值减1：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>FileHeader-&gt;NextRecordIdentifier = FileHeader-&gt;NextRecordIdentifier-1
+</code></pre></div></div>
+
+<h3 id="2重新计算file-header中的checksum">2、重新计算File header中的Checksum</h3>
+
+<p>计算CRC校验和的c代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>unsigned int CRC32[256];
+static void init_table()
+{
+	int i, j;
+	unsigned int crc;
+	for (i = 0; i &lt; 256; i++)
+	{
+		crc = i;
+		for (j = 0; j &lt; 8; j++)
+		{
+			if (crc &amp; 1)
+				crc = (crc &gt;&gt; 1) ^ 0xEDB88320;
+			else
+				crc = crc &gt;&gt; 1;
+		}
+		CRC32[i] = crc;
+	}
+}
+
+unsigned int GetCRC32(unsigned char *buf, int len)
+{
+	unsigned int ret = 0xFFFFFFFF;
+	int i;
+	static char init = 0;
+	if (!init)
+	{
+		init_table();
+		init = 1;
+	}
+	for (i = 0; i &lt; len; i++)
+	{
+		ret = CRC32[((ret &amp; 0xFF) ^ buf[i])] ^ (ret &gt;&gt; 8);
+	}
+	ret = ~ret;
+	return ret;
+}
+</code></pre></div></div>
+
+<p>计算File header前120字节的Checksum</p>
+
+<p>代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>unsigned char *ChecksumBuf = new unsigned char[120];
+memcpy(ChecksumBuf, (PBYTE)elfFilePtr, 120);
+crc32 = GetCRC32(ChecksumBuf, 120);
+</code></pre></div></div>
+
+<h3 id="3重新计算前一日志长度共2个位置偏移4和当前日志的最后4字节">3、重新计算前一日志长度，共2个位置(偏移4和当前日志的最后4字节)</h3>
+
+<p>通过搜索magic string <code class="language-plaintext highlighter-rouge">0x2A 0x2A 0x00 0x00</code>逐个定位Event Record</p>
+
+<p>(1)定位待删除的日志CurrentRecord</p>
+
+<p>读取长度，即CurrentRecord-&gt;Size</p>
+
+<p>(2) 定位前一日志PrevRecord</p>
+
+<p>读取长度，即PrevRecord-&gt;Size</p>
+
+<p>计算合并后的长度：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>NewSize = CurrentRecord-&gt;Size + PrevRecord-&gt;Size
+</code></pre></div></div>
+
+<p>更新长度：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PrevRecord-&gt;Size = NewSize
+</code></pre></div></div>
+
+<p>(3) 定位后一日志NextRecord</p>
+
+<p>使用NewSize替换NextRecord起始点前的4字节：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>*(PULONG)((PBYTE)NextRecord-4) = NewSize
+</code></pre></div></div>
+
+<h3 id="4后续日志的event-record-identifier依次减1">4、后续日志的Event record identifier依次减1</h3>
+
+<p>遍历后续日志，Event record identifier依次减1</p>
+
+<p>需要修改两个位置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CurrentRecord-&gt;EventRecordIdentifier = CurrentRecord-&gt;EventRecordIdentifier-1 
+CurrentRecord-&gt;Template-&gt;EventRecordIdentifier = CurrentRecord-&gt;Template-&gt;EventRecordIdentifier-1
+</code></pre></div></div>
+
+<h3 id="5elfchuk中的last-event-record-number减1">5、ElfChuk中的Last event record number减1</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ElfChuk-&gt;LastEventRecordNumber = ElfChuk-&gt;LastEventRecordNumber-1
+</code></pre></div></div>
+
+<h3 id="6-elfchuk中的last-event-record-identifier减1">6、 ElfChuk中的Last event record identifier减1</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ElfChuk-&gt;LastEventRecordIdentifier = ElfChuk-&gt;LastEventRecordIdentifier-1
+</code></pre></div></div>
+
+<h3 id="7重新计算elfchuk中event-records-checksum">7、重新计算ElfChuk中Event records checksum</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>unsigned char *ChecksumBuf = new unsigned char[currentChunk-&gt;FreeSpaceOffset - 512];		
+memcpy(ChecksumBuf, (PBYTE)currentChunk+512, currentChunk-&gt;FreeSpaceOffset - 512);
+crc32 = GetCRC32(ChecksumBuf, currentChunk-&gt;FreeSpaceOffset - 512);
+</code></pre></div></div>
+
+<h3 id="8-重新计算elfchuk中checksum">8、 重新计算ElfChuk中Checksum</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>unsigned char *ChecksumBuf = new unsigned char[504];
+memcpy(ChecksumBuf, (PBYTE)currentChunk, 120);
+memcpy(ChecksumBuf+120, (PBYTE)currentChunk+128, 384);
+crc32 = GetCRC32(ChecksumBuf, 504);
+</code></pre></div></div>
+
+<h2 id="0x04-删除最后一条日志">0x04 删除最后一条日志</h2>
+<hr>
+
+<p>删除最后一条日志在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/Windows-XML-Event-Log-(EVTX)%E5%8D%95%E6%9D%A1%E6%97%A5%E5%BF%97%E6%B8%85%E9%99%A4-%E4%B8%80-%E5%88%A0%E9%99%A4%E6%80%9D%E8%B7%AF%E4%B8%8E%E5%AE%9E%E4%BE%8B/">《Windows XML Event Log (EVTX)单条日志清除（一）——删除思路与实例》</a>做过实例演示，与删除中间日志的方法基本相同</p>
+
+<p>区别如下：</p>
+
+<ol>
+  <li>后续日志的Event record identifier不需要减1，因为没有后续日志</li>
+  <li>需要重新计算ElfChuk中的Last event record data offset</li>
+</ol>
+
+<p>程序细节如下：</p>
+
+<p>1、重新计算ElfChuk中的Last event record data offset</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ElfChuk-&gt;LastEventRecordDataOffset = ElfChuk-&gt;LastEventRecordDataOffset-LastRecord-&gt;Size
+</code></pre></div></div>
+
+<h2 id="0x05-删除第一条日志">0x05 删除第一条日志</h2>
+<hr>
+
+<p>修改日志长度的方法不适用于删除第一条日志，因为没有前一个日志覆盖当前日志</p>
+
+<p>如果想要依旧使用覆盖长度的方法实现，需要对日志的文件格式做进一步分析</p>
+
+<p>我们知道，Event Record的内容以Binary XML格式保存</p>
+
+<p>Binary XML格式可参考：</p>
+
+<p>https://github.com/libyal/libevtx/blob/master/documentation/Windows%20XML%20Event%20Log%20(EVTX).asciidoc#4-binary-xml</p>
+
+<p>通过修改Binary XML格式的内容实现合并日志，需要修改以下内容：</p>
+
+<ul>
+  <li>Written date and time</li>
+  <li>Template definition Data size</li>
+  <li>Next template definition offset</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>该方法同样适用于修改中间日志和最后一条日志，所以说，只要理解了日志格式，删除的方法不唯一</p>
+
+<p>其他实现的细节见开源代码，地址如下：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/DeleteRecordofFile.cpp</p>
+
+<p>代码实现了读取指定日志文件<code class="language-plaintext highlighter-rouge">c:\\test\\Setup.evtx</code>，删除单条日志(EventRecordID=14)，并保存为新的日志文件<code class="language-plaintext highlighter-rouge">c:\\test\\SetupNew.evtx</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>在代码的实现细节上我参考了看雪上的Demo代码，地址如下：</p>
+
+<p>https://bbs.pediy.com/thread-219313.htm</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了删除evtx文件单条日志记录的思路和程序实现细节，开源代码。删除单条日志记录的方法不唯一。接下来将会介绍删除当前系统单条日志记录的多个方法。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on June  2, 2018
+  </div>
+
+  
+</article>

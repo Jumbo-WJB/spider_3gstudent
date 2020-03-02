@@ -1,0 +1,360 @@
+<article class="post">
+  <h1>渗透技巧——程序的降权启动</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试中，常常会遇到需要改变程序启动权限（分为提权和降权）的情况。</p>
+
+<p>提权包含从普通用户权限到管理员权限和从管理员权限到system权限，而渗透测试中的降权通常是指从system权限降到普通用户权限（从管理员权限降到普通用户权限比较简单，方法很多），往往是为了操作当前用户的文件内容（如捕获桌面、操作注册表等）</p>
+
+<p>本文将会介绍具体的降权方法（从system权限降到普通用户权限），理清其中的重点，并且开源一个小工具，用于判断进程权限</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>为什么要降权</li>
+  <li>从管理员权限降到普通用户权限的方法</li>
+  <li>从system权限降到普通用户权限的方法</li>
+  <li>利用SelectMyParent实现提权和降权</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>测试系统： Win7</p>
+
+<h2 id="0x02-为什么要降权">0x02 为什么要降权</h2>
+<hr>
+
+<p>使用sytem权限的进程可能会遇到以下问题:</p>
+
+<p><strong>1、无法获得当前用户的文件内容</strong></p>
+
+<p>例如无法捕获用户的屏幕</p>
+
+<p><strong>2、环境变量有差异</strong></p>
+
+<p>比如以下环境变量：</p>
+
+<ul>
+  <li>APPDATA</li>
+  <li>Temp</li>
+  <li>Tmp</li>
+  <li>USERDOMAIN</li>
+  <li>USERNAME</li>
+  <li>USERPROFILE</li>
+</ul>
+
+<p>cmd下可通过echo查看环境变量，例如查看环境变量APPDATA的命令为：</p>
+
+<p><code class="language-plaintext highlighter-rouge">echo %appdata%</code></p>
+
+<p>system权限下，查询到的环境变量APPDATA为<code class="language-plaintext highlighter-rouge">C:\Windows\system32\config\systemprofile\AppData\Roaming</code></p>
+
+<p>管理员权限下，查询到的环境变量APPDATA为<code class="language-plaintext highlighter-rouge">C:\Users\a\AppData\Roaming</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/2-1.png" alt="Alt text"></p>
+
+<p>通过API SHGetSpecialFolderPath 获取指定的系统路径，如APPDATA，也能发现权限不同导致的区别</p>
+
+<p>c++代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;windows.h&gt;
+#include &lt;Shlobj.h&gt;
+
+bool IsSystemPrivilegeCmp()
+{
+    static bool isSystemPrivilege = false;
+	char *flag="C:\\Windows";
+    if (isSystemPrivilege)
+    {
+        return isSystemPrivilege;
+    }
+    char szPath[MAX_PATH] = {0};
+    if (SHGetSpecialFolderPathA(NULL, szPath, CSIDL_APPDATA, TRUE))
+    {
+        printf("APPDATA Path:%s\n",szPath);   
+		if(memcmp(szPath,flag,strlen(flag))==0)
+			printf("[+]I'm System Privilege\n");
+		else
+			printf("[-]Not System Privilege\n");
+    }
+    return isSystemPrivilege;
+}
+
+int main(int argc, CHAR* argv[])
+{
+	IsSystemPrivilegeCmp();	
+	return 0;
+}
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/2-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>SHGetSpecialFolderPath支持查询的系统路径可在Shlobj.h中获取</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/2-3.png" alt="Alt text"></p>
+
+<p><strong>3、注册表有差异</strong></p>
+
+<p>对HKCU的部分注册表操作会被重定向到HKEY_USERS.DEFAULT</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/2-4.png" alt="Alt text"></p>
+
+<h2 id="0x03-从管理员权限降到普通用户权限的方法">0x03 从管理员权限降到普通用户权限的方法</h2>
+<hr>
+
+<h3 id="1runas">1、runas</h3>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">runas /user:a calc.exe</code></p>
+
+<p>接着输入密码：123456</p>
+
+<p>calc.exe的权限为用户a的权限</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/3-1.png" alt="Alt text"></p>
+
+<p><strong>缺点：</strong></p>
+
+<p>需要等待用户手动输入密码，不够自动化</p>
+
+<p>但是可以借助管道实现自动输入密码，需要借助第三方工具Sanur，方法不具体介绍</p>
+
+<h3 id="2第三方工具lsrunas">2、第三方工具：lsrunas</h3>
+
+<p>下载地址：</p>
+
+<p>http://www.verydoc.com/exeshell.html</p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">lsrunas.exe /user:a /password:123456 /domain: /command:"calc.exe" /runpath:c:\</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>/domain:参数为空表示为本机</p>
+
+<p>从管理员权限降权到普通用户权限，成功，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/4-1.png" alt="Alt text"></p>
+
+<h3 id="3第三方工具cpau">3、第三方工具：CPAU</h3>
+
+<p>下载地址可参考我的github：</p>
+
+<p>https://github.com/3gstudent/From-System-authority-to-Medium-authority</p>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">CPAU.exe  -u a -p 123456 -ex "calc.exe" -cwd c:\windows\system32 -lwp</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>必须添加参数-lwp或-lwop，否则无法实现降权</p>
+
+<p>从管理员权限降权到普通用户权限，成功，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/4-2.png" alt="Alt text"></p>
+
+<h3 id="4powershell">4、powershell</h3>
+
+<p>代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$uname="a"                                                      
+$pwd=ConvertTo-SecureString  "123456" -AsPlainText –Force                   
+$cred=New-Object System.Management.Automation.PSCredential($uname,$pwd)        
+Start-Process -FilePath  "calc.exe" -Credential $cred  
+</code></pre></div></div>
+
+<h3 id="5c">5、c++</h3>
+
+<p>使用API：</p>
+
+<ul>
+  <li>CreateProcessAsUser</li>
+  <li>CreateProcess</li>
+</ul>
+
+<h2 id="0x04-从system权限降到普通用户权限的方法">0x04 从system权限降到普通用户权限的方法</h2>
+<hr>
+
+<p><strong>注：</strong></p>
+
+<p>本次测试的system权限通过漏洞获取</p>
+
+<h3 id="1runas-1">1、runas</h3>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">runas /user:a calc.exe</code></p>
+
+<p>接着输入密码：123456</p>
+
+<p>成功降权，但启动失败，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/5-1.png" alt="Alt text"></p>
+
+<h3 id="2第三方工具lsrunas-1">2、第三方工具：lsrunas</h3>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">lsrunas.exe /user:a /password:123456 /domain: /command:"calc.exe" /runpath:c:\</code></p>
+
+<p>同上，成功降权，但启动失败</p>
+
+<h3 id="3第三方工具cpau-1">3、第三方工具：CPAU</h3>
+
+<p>cmd：</p>
+
+<p><code class="language-plaintext highlighter-rouge">CPAU.exe  -u a -p 123456 -ex "calc.exe" -lwp</code></p>
+
+<p>CPAU不支持system权限启动，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/5-2.png" alt="Alt text"></p>
+
+<h3 id="4powershell-1">4、powershell</h3>
+
+<p>同1，成功降权，但启动失败</p>
+
+<h3 id="5c-1">5、c++</h3>
+
+<p>可以使用Didier Stevens的工具SelectMyParent</p>
+
+<p><strong>注：</strong></p>
+
+<p>该代码尚未在github共享，所以我在我的github上传了该代码，并注明作者为Didier Stevens</p>
+
+<p>代码地址：</p>
+
+<p>https://github.com/3gstudent/From-System-authority-to-Medium-authority/blob/master/SelectMyParent.cpp</p>
+
+<h3 id="selectmyparent">SelectMyParent：</h3>
+
+<p>用来创建具有选定父进程的windows进程</p>
+
+<p>例如：创建新进程calc.exe，使用SelectMyParent可以将新进程calc.exe设置为进程winlogon.exe的子进程</p>
+
+<p>使用步骤：</p>
+
+<p><strong>1、获取进程winlogon.exe的pid</strong></p>
+
+<p>在我的测试系统中，进程winlogon.exe的pid为504</p>
+
+<p><strong>2、启动SelectMyParent</strong></p>
+
+<p>参数如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">SelectMyParent.exe calc.exe 504</code></p>
+
+<p>显示calc.exe为winlogon.exe的子进程，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/6-1.png" alt="Alt text"></p>
+
+<p>该方法主要可以用来提高进程的隐蔽性，欺骗用户</p>
+
+<p><strong>特别的地方：</strong></p>
+
+<p>由于子进程会继承父进程的权限，并且winlogon.exe的权限为system，那么其子进程calc.exe的权限也将会成为system</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/6-2.png" alt="Alt text"></p>
+
+<p>也就是说，我们可以基于SelectMyParent实现以下提权和降权操作：</p>
+
+<ul>
+  <li>提权：从管理员权限到system权限</li>
+  <li>降权：从system权限到admin权限</li>
+  <li>降权：从system权限到普通用户权限</li>
+</ul>
+
+<p><strong>操作步骤：</strong></p>
+
+<p><strong>1、获取进程pid</strong></p>
+
+<p>cmd下获取进程pid的方法：</p>
+
+<p><code class="language-plaintext highlighter-rouge">tasklist /v /fo list</code></p>
+
+<p>可获取每个进程对应的pid及权限(用户名的值表示)，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/6-3.png" alt="Alt text"></p>
+
+<p>为了方便测试，可以使用过滤将特定权限的进程筛选出来，例如筛选NT AUTHORITY\SYSTEM</p>
+
+<p>命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">tasklist /v /fo list /fi "USERNAME eq NT AUTHORITY\SYSTEM"</code></p>
+
+<p>如果是获取普通用户权限的进程，筛选的USERNAME可设置为<code class="language-plaintext highlighter-rouge">whoami</code>的返回结果</p>
+
+<p><strong>2、使用SelectMyParent.exe</strong></p>
+
+<p><strong>从管理员权限到system权限：</strong></p>
+
+<p>上文已经演示，不再重复介绍</p>
+
+<p><strong>从system权限到admin权限：</strong></p>
+
+<p>通过tasklist无法区分进程是否是管理员权限还是普通用户权限</p>
+
+<p>于是我通过c++写了一个小工具，作用如下：</p>
+
+<ul>
+  <li>遍历进程</li>
+  <li>判断进程权限，如果为管理员权限，进行标记</li>
+</ul>
+
+<p>代码下载地址：</p>
+
+<p>https://github.com/3gstudent/From-System-authority-to-Medium-authority/blob/master/Processauthority.cpp</p>
+
+<p>工具使用如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/6-4.png" alt="Alt text"></p>
+
+<p><strong>从system权限到普通用户权限：</strong></p>
+
+<p>选取普通用户权限进程，pid为3864，创建的calc.exe权限也会具有普通用户权限，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-5-30/6-5.png" alt="Alt text"></p>
+
+<p>成功实现从system权限到普通用户权限的降权</p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文对常用降权方法进行测试，结论是有些条件下降权方法会失效，通用的方式是使用SelectMyParent进行降权。</p>
+
+<p>结合实际，开源了遍历判断进程权限的小工具，用于提高效率。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+  </div>
+
+  <div class="date">
+    Written on May 30, 2017
+  </div>
+
+  
+</article>

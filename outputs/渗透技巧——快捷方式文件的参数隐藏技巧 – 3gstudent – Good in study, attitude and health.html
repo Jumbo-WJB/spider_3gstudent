@@ -1,0 +1,491 @@
+<article class="post">
+  <h1>渗透技巧——快捷方式文件的参数隐藏技巧</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>最近，phrozensoft在博客中介绍了关于快捷方式的利用技巧，实现了将应用程序存储在快捷方式当中，当用户打开快捷方式时，通过vbs脚本释放应用程序并运行。</p>
+
+<p>我对此很感兴趣，因为快捷方式的参数默认存在长度限制，最大为260，并且我在研究jsrat的过程也遇到过这个问题(最后通过调用sct文件解决了长度限制问题)</p>
+
+<p>phrozensoft分享了Delphi格式的POC代码，本文将要对其进行测试，研究lnk的文件格式，开发出对应powershell实现的POC代码，简单分析该技术的利用和防御方法</p>
+
+<p>phrozensoft博客地址：</p>
+
+<p>https://www.phrozensoft.com/2016/12/shortcuts-as-entry-points-for-malware-poc-part-2-19</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<h3 id="delphi">Delphi</h3>
+
+<p>是Windows平台下著名的快速应用程序开发工具</p>
+
+<p>Borland公司研发</p>
+
+<p>也可以在LINUX平台上开发应用，其在LINUX上的对应产品Kylix</p>
+
+<p>常用版本：</p>
+
+<ul>
+  <li>Borland Delphi 7</li>
+  <li>Delphi 2010</li>
+</ul>
+
+<h2 id="0x02-delphi-poc测试">0x02 Delphi POC测试</h2>
+<hr>
+
+<p>phrozensoft博客中也分享了其他功能的poc，如生成lnk文件的python脚本，本文暂不介绍，只测试其中的Delphi POC</p>
+
+<p><strong>环境搭建：</strong></p>
+
+<p>测试系统：Win7 x86</p>
+
+<p>Delphi版本：Delphi 2010</p>
+
+<p><strong>注:</strong></p>
+
+<p>使用Delphi 7会存在编译不通过的错误，提示<code class="language-plaintext highlighter-rouge">“File not found System.sysutils.dcu”</code>
+换用Delphi 2010后，poc作细微修改编译通过</p>
+
+<h3 id="1新建工程">1.新建工程</h3>
+
+<p>打开Delphi 2010</p>
+
+<p>选择File-New-Other-Console Application</p>
+
+<p>直接复制poc代码，提示错误，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-1.png" alt="Alt text"></p>
+
+<h3 id="2修改poc">2.修改poc</h3>
+
+<p>经测试，System.SysUtils需要更改为SysUtils</p>
+
+<p>编译通过，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-2.png" alt="Alt text"></p>
+
+<h3 id="3编译">3.编译</h3>
+
+<p>选择Project-Build All Projects</p>
+
+<p>如图，编译成功，生成Project1.exe</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-3.png" alt="Alt text"></p>
+
+<h3 id="4测试">4.测试</h3>
+
+<p>新建test.txt,填入超过260个字符的数据：</p>
+
+<p><code class="language-plaintext highlighter-rouge">echo 123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678123456781234567812345678</code></p>
+
+<p>cmd下执行如下命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">Project1.exe test.txt test.lnk</code></p>
+
+<p>生成test.lnk</p>
+
+<p>查看命令行参数，只能看到长度为260的字符串，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-4.png" alt="Alt text"></p>
+
+<p>然而，lnk文件的大小为2.45kb，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-5.png" alt="Alt text"></p>
+
+<p>(看起来我们发现了有趣的地方)</p>
+
+<p>cmd下打开test.lnk，lnk文件的参数正常执行，显示的字符超过超过260个，没有被截断，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-6.png" alt="Alt text"></p>
+
+<p>使用16进制编辑器Hex Editor查看lnk文件格式，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-7.png" alt="Alt text"></p>
+
+<p><strong>注:</strong></p>
+
+<p>无法使用UltraEdit，UltraEdit打开lnk文件默认会打开lnk指向的文件
+实例如图，指向cmd.exe</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/2-8.png" alt="Alt text"></p>
+
+<h2 id="0x03-lnk文件格式介绍">0x03 Lnk文件格式介绍</h2>
+<hr>
+
+<h3 id="1整体结构">1、整体结构</h3>
+
+<ul>
+  <li>文件头</li>
+  <li>Shell Item Id List段</li>
+  <li>文件位置信息段</li>
+  <li>描述字符段</li>
+  <li>相对路径段</li>
+  <li>工作目录段</li>
+  <li>命令行段</li>
+  <li>图标文件段</li>
+  <li>附加信息段</li>
+</ul>
+
+<h3 id="2文件头结构">2、文件头结构</h3>
+
+<p>1.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">0h</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">固定值，字符为L</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-1.png" alt="Alt text"></p>
+
+<p>2.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">4h</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">GUID</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-2.png" alt="Alt text"></p>
+
+<p>3.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">14h</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">属性标志位</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>将该四字节以二进制表示，如果0-6位为1，分别代表该lnk文件包含以下属性：</p>
+
+<p>0位 有shell item id list
+1位 指向文件或文件夹 
+2位 存在描述字符串
+3位 存在相对路径
+4位 存在工作路径
+5位 存在命令行参数
+6位 存在自定义图标</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-3.png" alt="Alt text"></p>
+
+<p>偏移14h，取4字节为000000f5,二进制表示为<code class="language-plaintext highlighter-rouge">11110101</code></p>
+
+<p>0、2、4、5、6位为1，对应包含如下属性：</p>
+
+<ul>
+  <li>有shell item id list</li>
+  <li>存在描述字符串</li>
+  <li>存在工作路径</li>
+  <li>存在命令行参数</li>
+  <li>存在自定义图标</li>
+</ul>
+
+<p>4.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">18h</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">目标文件属性</td>
+    </tr>
+    <tr>
+      <td style="text-align: center">1ch</td>
+      <td style="text-align: center">8字节</td>
+      <td style="text-align: center">文件创建时间</td>
+    </tr>
+    <tr>
+      <td style="text-align: center">24h</td>
+      <td style="text-align: center">8字节</td>
+      <td style="text-align: center">文件修改时间</td>
+    </tr>
+    <tr>
+      <td style="text-align: center">2ch</td>
+      <td style="text-align: center">8字节</td>
+      <td style="text-align: center">文件最后一次访问时间</td>
+    </tr>
+    <tr>
+      <td style="text-align: center">34h</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">目标文件长度</td>
+    </tr>
+    <tr>
+      <td style="text-align: center">38h</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">自定义图标个数</td>
+    </tr>
+    <tr>
+      <td style="text-align: center">3ch</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">窗口执行方式：1.正常2.最小化3.最大化</td>
+    </tr>
+    <tr>
+      <td style="text-align: center">40h</td>
+      <td style="text-align: center">4字节</td>
+      <td style="text-align: center">热键</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="3shell-item-id-list">3、shell item id list</h3>
+
+<p>由14h位置得出test.lnk存在shell item id list，所以从4ch开始的第一个段为shell item id list</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">4ch</td>
+      <td style="text-align: center">2字节</td>
+      <td style="text-align: center">shell item id list总长度</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-4.png" alt="Alt text"></p>
+
+<p>shell item id list总长度为0129</p>
+
+<p>下一段（描述字符串）的起始地址为004e+0129=0177h</p>
+
+<h3 id="4描述字符串">4、描述字符串</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">004e+0129=0177h</td>
+      <td style="text-align: center">2字节</td>
+      <td style="text-align: center">长度（Unicode），实际长度要乘以2</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-5.png" alt="Alt text"></p>
+
+<p>描述字符串长度为000c（Unicode）</p>
+
+<p>下一段（工作路径）的起始地址为0177+2+000c×2=0191h</p>
+
+<h3 id="5工作路径">5、工作路径</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">0177+2+000c×2=0191h</td>
+      <td style="text-align: center">2字节</td>
+      <td style="text-align: center">长度（Unicode），实际长度要乘以2</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-6.png" alt="Alt text"></p>
+
+<p>工作路径长度为0012（Unicode）</p>
+
+<p>下一段（命令行参数）的起始地址为0191+2+0012×2=01b7h</p>
+
+<h3 id="6命令行参数">6、命令行参数</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">0191+2+0012×2=01b7h</td>
+      <td style="text-align: center">2字节</td>
+      <td style="text-align: center">长度（Unicode），实际长度要乘以2</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-7.png" alt="Alt text"></p>
+
+<p>命令行参数长度为039f（Unicode）</p>
+
+<p>下一段（自定义图标）的起始地址为01b7+2+039f×2=08f7h</p>
+
+<h3 id="7自定义图标">7、自定义图标</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center">偏移</th>
+      <th style="text-align: center">长度</th>
+      <th style="text-align: center">说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center">01b7+2+039f×2=08f7h</td>
+      <td style="text-align: center">2字节</td>
+      <td style="text-align: center">长度（Unicode），实际长度要乘以2</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/3-8.png" alt="Alt text"></p>
+
+<p>自定义图标长度为000bf（Unicode）</p>
+
+<p>下一段（自定义图标）的起始地址为08f7+2+000b×2=090fh</p>
+
+<h2 id="0x04-实现原理">0x04 实现原理</h2>
+<hr>
+
+<p>结合Delphi的POC代码和Lnk文件格式，对比正常lnk文件和poc文件差异，发现只有命令行参数长度不同</p>
+
+<p>故推断出原理：</p>
+
+<p><code class="language-plaintext highlighter-rouge">只要命令行参数长度超过260即可！</code></p>
+
+<p>测试powershell代码:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$file = Get-Content "c:\test\test.txt"
+$WshShell = New-Object -comObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut("c:\test\test.lnk")
+$Shortcut.TargetPath = "%SystemRoot%\system32\cmd.exe"
+$Shortcut.IconLocation = "%SystemRoot%\System32\Shell32.dll,21"
+$Shortcut.Arguments = '                                                                                                                                                                                                                                      '+ $file
+$Shortcut.Save()
+</code></pre></div></div>
+
+<p>test.txt中写入如下内容：</p>
+
+<p><code class="language-plaintext highlighter-rouge">/c start calc.exe</code></p>
+
+<p>执行命令后生成的test.lnk文件格式如图，260个空格字符后面接着为payload代码</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/4-1.png" alt="Alt text"></p>
+
+<p>查看文件参数，显示如图，均被空格字符填充，payload成功隐藏</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/4-2.png" alt="Alt text"></p>
+
+<p>运行test.lnk，弹出计算器，payload成功执行</p>
+
+<p>完整过程如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/5-1.gif" alt="Alt text"></p>
+
+<p>gif在线地址：</p>
+
+<p>https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-31/5-1.gif</p>
+
+<h2 id="0x05-利用思路">0x05 利用思路</h2>
+<hr>
+
+<p>可将payload放置在260个空字符之后</p>
+
+<p>这样无法在文件属性查看payload，只能通过文件格式去分析</p>
+
+<p>payload加密后分析难度也会变大</p>
+
+<h2 id="0x06-防御">0x06 防御</h2>
+<hr>
+
+<p>注意lnk文件大小</p>
+
+<p>必要情况下，直接分析16进制lnk文件格式</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>对于lnk文件，虽然通过查看文件属性无法看到lnk文件的命令行参数，但不代表其不存在，在此提醒用户注意</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on December 31, 2016
+  </div>
+
+  
+</article>

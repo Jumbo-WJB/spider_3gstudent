@@ -1,0 +1,344 @@
+<article class="post">
+  <h1>本地密码查看工具LaZagne中的自定义脚本开发</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>LaZagne是一款用于检索大量存储在本地计算机密码的开源应用程序。
+因为每个软件储存密码的方式不尽相同（明文、API、定制算法、数据库等），所以该工具使用多种方法获取软件密码，目前支持的软件如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/0.png" alt="Alt text"></p>
+
+<p>该工具通过python开发，易读、易维护，所以本文就尝试对其扩展，编写python脚本实现对360极速浏览器的密码导出，并且介绍脚本开发过程的细节。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>解决LaZagne中的bug</li>
+  <li>开发脚本导出360极速浏览器密码</li>
+  <li>使用py2exe将python脚本转成exe</li>
+  <li>使用PyInstaller将python脚本转成exe</li>
+</ul>
+
+<h2 id="0x02-lazagne中的bug">0x02 LaZagne中的bug</h2>
+<hr>
+
+<p><strong>LaZagne下载地址：</strong></p>
+
+<p>https://github.com/AlessandroZ/LaZagne</p>
+
+<p>python版本：2.7</p>
+
+<p>下载后执行<code class="language-plaintext highlighter-rouge">\LaZagne-master\LaZagne-master\Windows\laZagne.py</code></p>
+
+<p>报错，缺少第三方扩展包pyasn1和psutil</p>
+
+<p><strong>安装第三方扩展包：</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">
+C:\Python27\Scripts\easy_install.exe pyasn1</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">
+C:\Python27\Scripts\easy_install.exe psutil
+</code></p>
+
+<p>再次执行<code class="language-plaintext highlighter-rouge">\LaZagne-master\LaZagne-master\Windows\laZagne.py</code></p>
+
+<p>仍然报错，提示如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">ImportError: No module named memorpy</code></p>
+
+<p><del>经过搜索，并没有第三方扩展包memorpy，猜测是输入错误，正确的应该为<code class="language-plaintext highlighter-rouge">memory_profiler</code></del></p>
+
+<p><del><strong>安装扩展包memory_profiler：</strong></del></p>
+
+<p><del><code class="language-plaintext highlighter-rouge">C:\Python27\Scripts\easy_install.exe memory_profiler</code></del></p>
+
+<p><del>并且修改源文件：</del></p>
+
+<p><del>路径为<code class="language-plaintext highlighter-rouge">\LaZagne-master\LaZagne-master\Windows\lazagne\softwares\memory\memorydump.py</code></del></p>
+
+<p><del>Line14：<code class="language-plaintext highlighter-rouge">from memorpy import *</code></del></p>
+
+<p><del>修改为</del></p>
+
+<p><del><code class="language-plaintext highlighter-rouge">from memory_profiler import *</code></del></p>
+
+<p><del>成功执行laZagne.py，如下图</del></p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/1-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>改成<code class="language-plaintext highlighter-rouge">memory_profiler</code>后虽然成功编译，但是运行memory模块时会报错，提示Process没有list方法(bug发现和修改方法来自于<a href="https://github.com/burnegg">@burnegg</a>)</p>
+
+<p>修改思路：</p>
+
+<p>改回<code class="language-plaintext highlighter-rouge">memorpy</code></p>
+
+<p>安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Python27\Scripts\pip.exe install https://github.com/n1nj4sec/memorpy/archive/master.zip
+</code></pre></div></div>
+
+<h2 id="0x03-开发脚本导出360极速浏览器密码">0x03 开发脚本导出360极速浏览器密码</h2>
+<hr>
+
+<p>原工程提示开发自定义脚本可参考：</p>
+
+<p>https://github.com/AlessandroZ/LaZagne/wiki</p>
+
+<p>但是该网页并没有提示信息，经过分析代码结构，得出以下修改方法</p>
+
+<p><strong>360极速浏览器：</strong></p>
+
+<p>360极速浏览器使用chrome内核，猜测存储密码的功能同Chrome相近，因此使用360极速浏览器作为测试对象</p>
+
+<p>360极速浏览器提供密码保存功能，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/1-2.png" alt="Alt text"></p>
+
+<p>经测试发现：</p>
+
+<p>Chrome保存密码的文件路径为：</p>
+
+<p><code class="language-plaintext highlighter-rouge">
+C:\Users\1\Local Settings\Application Data\Google\Chrome\User Data\
+</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">
+C:\Users\1\AppData\Local\Google\Chrome\User Data\
+</code></p>
+
+<p>360极速浏览器保存密码的文件路径为：</p>
+
+<p><code class="language-plaintext highlighter-rouge">
+C:\Users\1\Local Settings\Application Data\360Chrome\Chrome\User Data\
+</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">
+C:\Users\1\AppData\Local\360Chrome\Chrome\User Data\
+</code></p>
+
+<p>经过对比，二者的差别仅在文件名存在差异，数据结构相同</p>
+
+<h3 id="添加360极速浏览器密码导出功能">添加360极速浏览器密码导出功能：</h3>
+
+<p><strong>1、修改\LaZagne-master\Windows\lazagne\config\manageModules.py</strong></p>
+
+<p>(1)Line6添加如下代码：</p>
+
+<p><code class="language-plaintext highlighter-rouge">from lazagne.softwares.browsers.cse import CSE</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/3-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>lazagne.softwares.browsers.cse表示文件名</p>
+
+<p>import CSE表示类名为CSE</p>
+
+<p>(2)Line6添加如下代码：</p>
+
+<p><code class="language-plaintext highlighter-rouge">CSE(),</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>添加moduleNames，对应类名CSE</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/3-2.png" alt="Alt text"></p>
+
+<p>详细代码可参照：</p>
+
+<p>https://github.com/3gstudent/LaZagne/blob/master/Windows/lazagne/config/manageModules.py</p>
+
+<p><strong>2、在\LaZagne-master\Windows\lazagne\softwares\browsers新建文件cse.py</strong></p>
+
+<p>文件内容参照同级目录的chrome.py，如下位置作修改即可：</p>
+
+<p>(1)Line10修改为<code class="language-plaintext highlighter-rouge">class CSE(ModuleInfo):</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>设置类名</p>
+
+<p>(2)</p>
+
+<p>Line12修改为<code class="language-plaintext highlighter-rouge">options = {'command': '-360cse', 'action': 'store_true', 'dest': '360CSE', 'help': 'cse'}</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>‘command’不能同chrome的-c重复</p>
+
+<p>‘dest’表示显示导出浏览器密码的标题</p>
+
+<p>(3)</p>
+
+<p>Line22修改为360路径<code class="language-plaintext highlighter-rouge">\Local Settings\Application Data\360Chrome\Chrome\User Data\</code></p>
+
+<p>Line23修改为360路径<code class="language-plaintext highlighter-rouge">\AppData\Local\360Chrome\Chrome\User Data\</code></p>
+
+<p>完整代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>	homedrive + homepath + '\\Local Settings\\Application Data\\360Chrome\\Chrome\\User Data', 
+	homedrive + homepath + '\\AppData\\Local\\360Chrome\\Chrome\\User Data', 
+</code></pre></div></div>
+
+<p>(4)其他提示信息将chrome换成360cse就好</p>
+
+<p>详细代码可参照：</p>
+
+<p>https://github.com/3gstudent/LaZagne/blob/master/Windows/lazagne/softwares/browsers/cse.py</p>
+
+<p>保存文件，再次执行laZagne.exe</p>
+
+<p>成功导出360极速浏览器保存的密码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/3-3.png" alt="Alt text"></p>
+
+<h2 id="0x04-使用py2exe将python脚本转成exe">0x04 使用py2exe将python脚本转成exe</h2>
+<hr>
+
+<p>LaZagne提供了编译好的Windows版本，下载地址如下：</p>
+
+<p>https://github.com/AlessandroZ/LaZagne/releases/</p>
+
+<p>但是如果想扩展功能，例如添加导出360极速浏览器密码的功能，就需要找到自己编译的方法</p>
+
+<p>使用py2exe的方法如下：</p>
+
+<p><strong>1、下载py2exe</strong></p>
+
+<p>地址如下：</p>
+
+<p>https://sourceforge.net/projects/py2exe/</p>
+
+<p><strong>2、新建mysetup.py</strong></p>
+
+<p>内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code># mysetup.py
+from distutils.core import setup
+import py2exe
+setup(console=["laZagne.py"])
+</code></pre></div></div>
+
+<p>保存在LaZagne-master\LaZagne-master\Windows\下，即laZagne.py的同级目录</p>
+
+<p><strong>3、生成</strong></p>
+
+<p>cmd执行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Python27\python.exe mysetup.py py2exe</code></p>
+
+<p><strong>4、测试</strong></p>
+
+<p>执行laZagne.exe</p>
+
+<p>提示<code class="language-plaintext highlighter-rouge">ImportError: No module named pyasn1</code></p>
+
+<p><strong>解决方法：</strong></p>
+
+<p>在C:\Python27\Lib\site-packages找到文件pyasn1-0.2.3-py2.7.egg</p>
+
+<p>将其解压缩，在同级目录生成文件夹pyasn1</p>
+
+<p>使用py2exe重新编译：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Python27\python.exe mysetup.py py2exe</code></p>
+
+<p>生成dist文件夹，再次执行laZagne.exe，成功，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/2-1.png" alt="Alt text"></p>
+
+<h2 id="0x05-使用pyinstaller将python脚本转成exe">0x05 使用PyInstaller将python脚本转成exe</h2>
+<hr>
+
+<p><strong>1、安装PyInstaller</strong></p>
+
+<p><strong>方法1：</strong> 使用pip安装</p>
+
+<p>安装pywin32，<strong>下载地址：</strong></p>
+
+<p>https://sourceforge.net/projects/pywin32/files/pywin32/</p>
+
+<p>使用pip安装：</p>
+
+<p><code class="language-plaintext highlighter-rouge">pip install pyinstaller</code></p>
+
+<p>报错，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/2-2.png" alt="Alt text"></p>
+
+<p><strong>方法2：</strong> 下载源码安装</p>
+
+<p><strong>源码下载地址：</strong></p>
+
+<p>http://www.pyinstaller.org/downloads.html</p>
+
+<p>测试使用的版本为<code class="language-plaintext highlighter-rouge">PyInstaller-3.2.1</code></p>
+
+<p>解压缩后进入其子目录bootloader：</p>
+
+<p><code class="language-plaintext highlighter-rouge">cd bootloader</code></p>
+
+<p>编译：</p>
+
+<p><code class="language-plaintext highlighter-rouge">python ./waf configure build install</code></p>
+
+<p>重新进入根目录：</p>
+
+<p><code class="language-plaintext highlighter-rouge">cd ..</code></p>
+
+<p>安装pyinstaller：</p>
+
+<p><code class="language-plaintext highlighter-rouge">python setup.py install</code></p>
+
+<p>安装成功，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/2-3.png" alt="Alt text"></p>
+
+<p><strong>2、打包exe</strong></p>
+
+<p>参数如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Python27\Scripts\pyinstaller-script.py -F C:\LaZagne-master\LaZagne-master\Windows\laZagne.py</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>-F参数表示打包成单个exe</p>
+
+<p>在C:\Python27\Scripts\下生成dist文件夹，里面包含生成的laZagne.exe</p>
+
+<p>测试系统(未安装Python)执行laZagne.exe</p>
+
+<p>成功运行，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-7-9/2-4.png" alt="Alt text"></p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了使用python编写LaZagne扩展脚本的方法，实现了导出360极速浏览器的用户密码。针对不同的软件，使用LaZagne定制脚本导出密码无疑是一个十分高效的方式。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on July  9, 2017
+  </div>
+
+  
+</article>

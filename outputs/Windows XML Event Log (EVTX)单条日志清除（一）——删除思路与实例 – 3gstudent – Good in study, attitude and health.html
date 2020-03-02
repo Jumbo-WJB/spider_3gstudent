@@ -1,0 +1,395 @@
+<article class="post">
+  <h1>Windows XML Event Log (EVTX)单条日志清除（一）——删除思路与实例</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Windows XML Event Log (EVTX)单条日志清除系列文章的第一篇，侧重于介绍evtx日志文件的基础知识和删除单条日志的实现思路与实例</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>evtx文件格式</li>
+  <li>删除单条日志的思路</li>
+  <li>删除单条日志的实例</li>
+</ul>
+
+<h2 id="0x02-基础知识evtx文件格式">0x02 基础知识：evtx文件格式</h2>
+<hr>
+
+<p>可参考的资料：</p>
+
+<p>https://github.com/williballenthin/python-evtx</p>
+
+<p>evtx文件是指Windows Vista之后用于保存系统日志信息的文件</p>
+
+<p>evtx文件结构包含三部分：</p>
+
+<ul>
+  <li>file header</li>
+  <li>chunks</li>
+  <li>trailing empty values</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>file header保存evtx文件基本信息，值得注意的是Next record identifier、Number of chunks、File flags和Checksum</p>
+
+<p>chunks保存日志内容，包括具体每条日志的内容和校验和，值得注意的是Last event record number、Last event record identifier、Last event record data offset和两个Checksum</p>
+
+<p>trailing empty values为尾随空值，用于填充文件长度，内容任意，不会影响evtx文件的有效性</p>
+
+<h4 id="1-file-header">(1) file header</h4>
+
+<p>格式可参考：</p>
+
+<p>https://github.com/libyal/libevtx/blob/master/documentation/Windows%20XML%20Event%20Log%20(EVTX).asciidoc#2-file-header</p>
+
+<h4 id="2-chunks">(2) chunks</h4>
+
+<p>格式可参考：</p>
+
+<p>https://github.com/libyal/libevtx/blob/master/documentation/Windows%20XML%20Event%20Log%20(EVTX).asciidoc#3-chunk</p>
+
+<p>chunks包含多个Event Record，1个Event Record对应一条日志信息</p>
+
+<h4 id="3-event-record">(3) Event Record</h4>
+
+<p>格式可参考：</p>
+
+<p>https://github.com/libyal/libevtx/blob/master/documentation/Windows%20XML%20Event%20Log%20(EVTX).asciidoc#32-event-record</p>
+
+<p>Event Record的内容以Binary XML格式保存</p>
+
+<p>Binary XML格式可参考：</p>
+
+<p>https://github.com/libyal/libevtx/blob/master/documentation/Windows%20XML%20Event%20Log%20(EVTX).asciidoc#4-binary-xml</p>
+
+<p>值得注意的是EventRecordID标签，用来表示日志的顺序号</p>
+
+<h3 id="实例演示">实例演示：</h3>
+
+<h4 id="1通过windows日志查看">1、通过Windows日志查看</h4>
+
+<p>查看事件日志，选中一条日志，选择<code class="language-plaintext highlighter-rouge">详细信息</code>-&gt;<code class="language-plaintext highlighter-rouge">XML视图</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/2-1.png" alt="Alt text"></p>
+
+<h4 id="2通过python脚本查看">2、通过python脚本查看</h4>
+
+<p>安装python-evtx：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>pip install python-evtx
+</code></pre></div></div>
+
+<p>下载脚本：</p>
+
+<p>https://github.com/williballenthin/python-evtx/blob/master/scripts/evtx_record_structure.py</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evtx_record_structure.py System.evtx 1915
+</code></pre></div></div>
+
+<p>回显如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>00000000: 2A 2A 00 00 38 01 00 00  7B 07 00 00 00 00 00 00  **..8...{.......
+00000010: 23 EB 07 A2 D4 FB D3 01  0F 01 01 00 0C 01 65 CE  #.............e.
+00000020: 1B C7 EE 0D 00 00 14 00  00 00 01 00 04 00 01 00  ................
+00000030: 04 00 02 00 06 00 02 00  06 00 02 00 06 00 08 00  ................
+00000040: 15 00 08 00 11 00 00 00  00 00 04 00 08 00 04 00  ................
+00000050: 08 00 08 00 0A 00 01 00  04 00 00 00 00 00 00 00  ................
+00000060: 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ................
+00000070: 00 00 00 00 00 00 8B 00  21 00 04 00 00 00 7C 1B  ........!.....|.
+00000080: 00 40 00 00 00 00 00 00  80 80 23 EB 07 A2 D4 FB  .@........#.....
+00000090: D3 01 D8 01 00 00 9C 07  00 00 7B 07 00 00 00 00  ..........{.....
+000000A0: 00 00 00 0F 01 01 00 0C  01 DE E1 DC 34 6C 11 00  ............4l..
+000000B0: 00 04 00 00 00 4E 00 01  00 08 00 01 00 04 00 08  .....N..........
+000000C0: 00 0E 00 0E 00 42 00 61  00 63 00 6B 00 67 00 72  .....B.a.c.k.g.r
+000000D0: 00 6F 00 75 00 6E 00 64  00 20 00 49 00 6E 00 74  .o.u.n.d. .I.n.t
+000000E0: 00 65 00 6C 00 6C 00 69  00 67 00 65 00 6E 00 74  .e.l.l.i.g.e.n.t
+000000F0: 00 20 00 54 00 72 00 61  00 6E 00 73 00 66 00 65  . .T.r.a.n.s.f.e
+00000100: 00 72 00 20 00 53 00 65  00 72 00 76 00 69 00 63  .r. .S.e.r.v.i.c
+00000110: 00 65 00 63 6B 28 57 D0  8F 4C 88 0E 00 00 00 42  .e.ck(W..L.....B
+00000120: 00 49 00 54 00 53 00 2F  00 34 00 00 00 00 00 00  .I.T.S./.4......
+00000130: 15 00 00 00 38 01 00 00                           ....8...
+record(absolute_offset=8776)
+RootNode(offset=0x18)
+  StreamStartNode(offset=0x18)
+  TemplateInstanceNode(offset=0x1c, resident=False)
+  Substitutions(offset=0x26)
+    UnsignedByteTypeNode(offset=0x7a) --&gt; 4
+    UnsignedByteTypeNode(offset=0x7b) --&gt; 0
+    UnsignedWordTypeNode(offset=0x7c) --&gt; 0
+    UnsignedWordTypeNode(offset=0x7e) --&gt; 7036
+    UnsignedWordTypeNode(offset=0x80) --&gt; 16384
+    Hex64TypeNode(offset=0x82) --&gt; 0x8080000000000000
+    FiletimeTypeNode(offset=0x8a) --&gt; 2018-06-04 07:21:19.394281
+    NullTypeNode(offset=0x92)
+    UnsignedDwordTypeNode(offset=0x92) --&gt; 472
+    UnsignedDwordTypeNode(offset=0x96) --&gt; 1948
+    UnsignedQwordTypeNode(offset=0x9a) --&gt; 1915
+    UnsignedByteTypeNode(offset=0xa2) --&gt; 0
+    NullTypeNode(offset=0xa3)
+    NullTypeNode(offset=0xa3)
+    NullTypeNode(offset=0xa3)
+    NullTypeNode(offset=0xa3)
+    NullTypeNode(offset=0xa3)
+    NullTypeNode(offset=0xa3)
+    NullTypeNode(offset=0xa3)
+    BXmlTypeNode(offset=0xa3) --&gt;
+      RootNode(offset=0xa3)
+        StreamStartNode(offset=0xa3)
+        TemplateInstanceNode(offset=0xa7, resident=False)
+        Substitutions(offset=0xb1)
+          WstringTypeNode(offset=0xc5) --&gt; Background Intelligent Transfer Servi
+ce
+          WstringTypeNode(offset=0x113) --&gt; 正在运行
+          UnsignedDwordTypeNode(offset=0x11b) --&gt; 14
+          BinaryTypeNode(offset=0x11f) --&gt; QgBJAFQAUwAvADQAAAA=
+
+
+&lt;Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"&gt;&lt;System&gt;&lt;Pr
+ovider Name="Service Control Manager" Guid="{555908d1-a6d7-4695-8e1e-26931d2012f
+4}" EventSourceName="Service Control Manager"&gt;&lt;/Provider&gt;
+&lt;EventID Qualifiers="16384"&gt;7036&lt;/EventID&gt;
+&lt;Version&gt;0&lt;/Version&gt;
+&lt;Level&gt;4&lt;/Level&gt;
+&lt;Task&gt;0&lt;/Task&gt;
+&lt;Opcode&gt;0&lt;/Opcode&gt;
+&lt;Keywords&gt;0x8080000000000000&lt;/Keywords&gt;
+&lt;TimeCreated SystemTime="2018-06-04 07:21:19.394281"&gt;&lt;/TimeCreated&gt;
+&lt;EventRecordID&gt;1915&lt;/EventRecordID&gt;
+&lt;Correlation ActivityID="" RelatedActivityID=""&gt;&lt;/Correlation&gt;
+&lt;Execution ProcessID="472" ThreadID="1948"&gt;&lt;/Execution&gt;
+&lt;Channel&gt;System&lt;/Channel&gt;
+&lt;Computer&gt;WIN-E8C6J8CN50O&lt;/Computer&gt;
+&lt;Security UserID=""&gt;&lt;/Security&gt;
+&lt;/System&gt;
+&lt;EventData&gt;&lt;Data Name="param1"&gt;Background Intelligent Transfer Service&lt;/Data&gt;
+&lt;Data Name="param2"&gt;&amp;#27491;&amp;#22312;&amp;#36816;&amp;#34892;&lt;/Data&gt;
+&lt;Binary&gt;QgBJAFQAUwAvADQAAAA=&lt;/Binary&gt;
+&lt;/EventData&gt;
+&lt;/Event&gt;
+</code></pre></div></div>
+
+<h2 id="0x03-删除单条日志的思路">0x03 删除单条日志的思路</h2>
+<hr>
+
+<p>Windows系统在解析日志文件时，通过Event Record的Size长度逐个读取每一条日志的内容</p>
+
+<p>如果修改某条日志的长度，使长度覆盖下一条日志，那么Windows系统在解析时，就会跳过下一条日志，相当于下一条日志被隐藏</p>
+
+<p>DanderSpritz中的eventlogedit就是这个思路，只修改了长度，没有删除日志内容</p>
+
+<p>实现思路如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/2-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>图片来自https://blog.fox-it.com/2017/12/08/detection-and-recovery-of-nsas-covered-up-tracks/</p>
+
+<p>所以如果恢复每条日志的正确日志长度，就能够恢复出被隐藏的日志，恢复工具可使用如下python脚本：</p>
+
+<p>https://github.com/fox-it/danderspritz-evtx</p>
+
+<p>当然，如果以此为基础，把指定日志的内容清空，就能够实现真正的日志删除</p>
+
+<p>为了保证修改后的日志文件能够被正确识别，还需要修改多个标志位，重新计算校验和</p>
+
+<p>具体修改方法如下：</p>
+
+<ol>
+  <li>File header中的Next record identifier值减1</li>
+  <li>重新计算File header中的Checksum</li>
+  <li>修改Event Record:重新计算待删除Event Record前后长度，更新后续Event Record的Event record identifier</li>
+  <li>更新ElfChuk，修改如下内容：
+    <ul>
+      <li>Last event record number</li>
+      <li>Last event record identifier</li>
+      <li>Last event record data offset</li>
+      <li>Event records checksum</li>
+      <li>Checksum</li>
+    </ul>
+  </li>
+</ol>
+
+<h2 id="0x04-删除单条日志的实例">0x04 删除单条日志的实例</h2>
+<hr>
+
+<p>测试文件： System.evtx</p>
+
+<p>下载地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/System.evtx</p>
+
+<p>文件包含4条日志，下面演示如何删除第4条日志</p>
+
+<p>第4条日志内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-1.png" alt="Alt text"></p>
+
+<p>EventRecordID为1915</p>
+
+<h3 id="1file-header中的next-record-identifier值减1">1、File header中的Next record identifier值减1</h3>
+
+<p>File header位于文件最开始的部分</p>
+
+<p>Next record identifier的偏移为24(0x18h)，长度8</p>
+
+<p>对应测试文件System.evtx，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-2.png" alt="Alt text"></p>
+
+<p>Next record identifier为0x77Ch,即1916</p>
+
+<p>减1后为1915，即0x77Bh</p>
+
+<h3 id="2重新计算file-header中的checksum">2、重新计算File header中的Checksum</h3>
+
+<p>计算方法： 前120字节做CRC32运算，偏移为124(0x7Ch)，长度4</p>
+
+<p>修改Next record identifier后的内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-3.png" alt="Alt text"></p>
+
+<p>前120字节的内容为<code class="language-plaintext highlighter-rouge">456C6646696C6500000000000000000000000000000000007B0700000000000080000000010003000010010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000</code></p>
+
+<p>计算CRC32可使用如下python代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>import binascii   
+def crc2hex(crc):   
+    return '%08x' % (binascii.crc32(binascii.a2b_hex(crc)) &amp; 0xffffffff)     
+d='456C6646696C6500000000000000000000000000000000007B0700000000000080000000010003000010010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'  
+print(crc2hex(d))  
+</code></pre></div></div>
+
+<p>输出结果<code class="language-plaintext highlighter-rouge">ccc94756</code></p>
+
+<p>所以更新后的内容为<code class="language-plaintext highlighter-rouge">56 47 C9 CC</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-4.png" alt="Alt text"></p>
+
+<h3 id="3修改event-record">3、修改Event Record</h3>
+
+<p>通过搜索magic string <code class="language-plaintext highlighter-rouge">0x2A 0x2A 0x00 0x00</code>定位不同的Event Record</p>
+
+<p>第四条Event Record的内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-5.png" alt="Alt text"></p>
+
+<p>长度为0x138h</p>
+
+<p>Event record identifier为0x77Bh</p>
+
+<p>第三条Event Record的内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-6.png" alt="Alt text"></p>
+
+<p>长度为0x480h</p>
+
+<p>Event record identifier为0x77Ah</p>
+
+<p>修改第三条Event Record的长度，使其覆盖第四条Event Record</p>
+
+<p>新长度为0x138h+0x480h=0x5B8h</p>
+
+<p>由于是删除最后一条日志，所以不需要更新Event record identifier(共有两个位置)</p>
+
+<p><strong>注：</strong></p>
+
+<p>修改长度的位置有两个，分别为第三条日志的长度和第四条日志的最尾部</p>
+
+<p>修改后如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-7.png" alt="Alt text"></p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/3-8.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>本次测试只修改了Event Record的长度，后续可通过修复长度还原日志</p>
+
+<p>当然可以选择将日志内容清空，实现永久删除</p>
+
+<h3 id="4更新elfchuk">4、更新ElfChuk</h3>
+
+<p>搜索magic string <code class="language-plaintext highlighter-rouge">ElfChuk</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>有可能有多个ElfChuk，需要找到对应的ElfChuk</p>
+
+<p>测试文件System.evtx只有一个ElfChuk</p>
+
+<p>内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/4-1.png" alt="Alt text"></p>
+
+<p>Last event record number为0x4h</p>
+
+<p>Last event record identifier为0x77Bh</p>
+
+<p>Last event record data offset为0x1248h</p>
+
+<p>Event records checksum为0xD3D3DE43h</p>
+
+<p>Checksum为0xEB4C47BFh</p>
+
+<p>需要做如下修改：</p>
+
+<p>Last event record number减1，为0x3h</p>
+
+<p>Last event record identifier减1，为0x77Ah</p>
+
+<p>Last event record data offset为第三条Event Record相对于ElfChuk的偏移长度，为0xDC8h</p>
+
+<p>Event records checksum为所有Event records内容的CRC32校验和，包含3条日志内容，使用python脚本计算后，结果为0xF92FEDB9h</p>
+
+<p>Checksum为ElfChuk中0-120和128-512这些内容的CRC32校验和，结果为0x3CE0BF8h</p>
+
+<p>更新后，内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/4-2.png" alt="Alt text"></p>
+
+<p>保存为新文件System2.evtx</p>
+
+<p>下载地址：</p>
+
+<p>https://github.com/3gstudent/Eventlogedit-evtx–Evolution/blob/master/System2.evtx</p>
+
+<p><strong>注：</strong></p>
+
+<p>为了验证trailing empty values，我将第四条日志后的内容全部覆盖为0x41(字符A)，不影响日志文件的有效性</p>
+
+<p>System2.evtx被成功识别，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-1/4-3.png" alt="Alt text"></p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文介绍了基础知识和删除单条日志的实现思路，实例演示如何修改evtx文件，隐藏最后一条日志</p>
+
+<p>下一篇将要介绍如何编写程序实现自动删除指定日志</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on June  1, 2018
+  </div>
+
+  
+</article>

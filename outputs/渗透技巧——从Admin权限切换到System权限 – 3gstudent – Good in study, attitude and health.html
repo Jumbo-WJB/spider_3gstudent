@@ -1,0 +1,293 @@
+<article class="post">
+  <h1>渗透技巧——从Admin权限切换到System权限</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试中，某些情况下需要用到system权限，例如操作注册表<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SAM\SAM</code></p>
+
+<p>恰巧最近看到了一篇文章介绍了几种获得system权限的方法，于是决定结合自己的经验对这方面的技巧做系统整理</p>
+
+<p>当然，前提是已经获得系统的管理员权限</p>
+
+<p>学习链接：</p>
+
+<p>https://blog.xpnsec.com/becoming-system/</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>通过创建服务获得System权限的方法</li>
+  <li>利用MSIExec获得System权限的方法</li>
+  <li>利用token复制获得System权限的方法</li>
+  <li>利用Capcom.sys获得System权限的方法</li>
+</ul>
+
+<h2 id="0x02-通过创建服务获得system权限">0x02 通过创建服务获得System权限</h2>
+<hr>
+
+<h3 id="1通过sc命令实现">1、通过sc命令实现</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sc Create TestService1 binPath= "cmd /c start" type= own type= interact
+sc start TestService1
+</code></pre></div></div>
+
+<p>该方法在XP系统可以使用</p>
+
+<p>Win7下使用时控制台提示：</p>
+
+<blockquote>
+  <p>警告: 服务 TestService1 被配置为交互式服务，其支持正受到抨击。该服务可能无法正常起作用。</p>
+</blockquote>
+
+<p>服务启动时弹框，需要点击查看消息才能执行代码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-22/2-1.png" alt="Alt text"></p>
+
+<p>Win8下控制台提示错误，无法使用该方法</p>
+
+<h3 id="2通过计划任务">2、通过计划任务</h3>
+
+<p>使用at命令：</p>
+
+<p><code class="language-plaintext highlighter-rouge">at 7:50 notepad.exe</code></p>
+
+<p>默认以system权限启动，适用于Win7</p>
+
+<p>从Win8开始不再支持at命令</p>
+
+<p>使用schtasks命令：</p>
+
+<p>创建服务，以system权限启动：</p>
+
+<p><code class="language-plaintext highlighter-rouge">schtasks /Create /TN TestService2 /SC DAILY /ST 00:36 /TR notepad.exe /RU SYSTEM</code></p>
+
+<p>查看服务状态：</p>
+
+<p><code class="language-plaintext highlighter-rouge">schtasks /Query /TN TestService2</code></p>
+
+<p>删除服务：</p>
+
+<p><code class="language-plaintext highlighter-rouge">schtasks /Delete /TN TestService2 /F</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>使用schtasks创建服务后记得手动删除</p>
+
+<p>schtasks命令支持Win7-Win10</p>
+
+<h3 id="3利用psexec">3、利用psexec</h3>
+
+<p>使用psexec会创建PSEXESVC服务，产生日志Event 4697、Event 7045、Event 4624和Event 4652</p>
+
+<p>以system权限启动：</p>
+
+<p><code class="language-plaintext highlighter-rouge">psexec.exe -accepteula -s -d notepad.exe</code></p>
+
+<p>默认情况下，system权限的进程不会在用户桌面显示，如果需要显示进程界面，可以加<code class="language-plaintext highlighter-rouge">/i</code>参数，命令如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">psexec.exe -accepteula -s -i -d notepad.exe</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-22/2-2.png" alt="Alt text"></p>
+
+<h3 id="4meterpreter">4、Meterpreter</h3>
+
+<p>参考Meterpreter的方法：</p>
+
+<ul>
+  <li>创建system权限的服务，提供一个命名管道</li>
+  <li>创建进程，连接到该命名管道</li>
+</ul>
+
+<p>可供参考的代码：</p>
+
+<p>https://github.com/xpn/getsystem-offline</p>
+
+<p>需要getsystem-offline.exe和getsystem_service.exe</p>
+
+<p>测试如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-22/2-3.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>vs2012直接编译存在bug，可将函数<code class="language-plaintext highlighter-rouge">snprintf</code>替换为<code class="language-plaintext highlighter-rouge">_snprintf</code></p>
+
+<h2 id="0x03-利用msiexec获得system权限">0x03 利用MSIExec获得System权限</h2>
+<hr>
+
+<p>我曾在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%B5%8B%E8%AF%95%E4%B8%AD%E7%9A%84msiexec/">《渗透测试中的msiexec》</a>介绍过利用Advanced Installer制作msi文件的方法，这里不再赘述</p>
+
+<p>本节对XPN提到的方法做复现，使用wix3制作msi文件</p>
+
+<p>wix3下载地址：</p>
+
+<p>https://github.com/wixtoolset/wix3</p>
+
+<p>msigen.wix的代码可参考如下地址：</p>
+
+<p>https://gist.github.com/xpn/d1ef20dfd266053227d3e992ae84c64e</p>
+
+<p>编译命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>candle.exe msigen.wix
+torch.exe msigen.wixobj
+</code></pre></div></div>
+
+<p>我对XPN的代码做了修改，将payload替换为执行calc.exe，细节上做了部分修改，代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0"?&gt;
+&lt;Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"&gt;
+  &lt;Product Id="*" UpgradeCode="12345678-1234-1234-1234-111111111111" Name="Example Product 
+Name" Version="0.0.1" Manufacturer="@_xpn_" Language="1033"&gt;
+    &lt;Package InstallerVersion="200" Compressed="yes" Comments="Windows Installer Package"/&gt;
+    &lt;Media Id="1" /&gt;
+
+    &lt;Directory Id="TARGETDIR" Name="SourceDir"&gt;
+      &lt;Directory Id="ProgramFilesFolder"&gt;
+        &lt;Directory Id="INSTALLLOCATION" Name="Example"&gt;
+          &lt;Component Id="ApplicationFiles" Guid="12345678-1234-1234-1234-222222222222"&gt;     
+          &lt;/Component&gt;
+        &lt;/Directory&gt;
+      &lt;/Directory&gt;
+    &lt;/Directory&gt;
+
+    &lt;Feature Id="DefaultFeature" Level="1"&gt;
+      &lt;ComponentRef Id="ApplicationFiles"/&gt;
+    &lt;/Feature&gt;
+
+    &lt;Property Id="cmdline"&gt;calc.exe
+    &lt;/Property&gt;
+
+    &lt;CustomAction Id="SystemShell" Execute="deferred" Directory="TARGETDIR" 
+ExeCommand='[cmdline]' Return="ignore" Impersonate="no"/&gt;
+
+    &lt;CustomAction Id="FailInstall" Execute="deferred" Script="vbscript" Return="check"&gt;
+      invalid vbs to fail install
+    &lt;/CustomAction&gt;
+
+    &lt;InstallExecuteSequence&gt;
+      &lt;Custom Action="SystemShell" After="InstallInitialize"&gt;&lt;/Custom&gt;
+      &lt;Custom Action="FailInstall" Before="InstallFiles"&gt;&lt;/Custom&gt;
+    &lt;/InstallExecuteSequence&gt;
+
+  &lt;/Product&gt;
+&lt;/Wix&gt;
+
+</code></pre></div></div>
+
+<p>经过我的测试，使用torch.exe将msigen.wixobj编译成msigen.msi文件会报错，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-22/2-4.png" alt="Alt text"></p>
+
+<p>使用light.exe能够成功生成msigen.msi，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-11-22/2-5.png" alt="Alt text"></p>
+
+<p>虽然报错，但不影响文件的生成和功能的执行</p>
+
+<p>也就是说，完整编译命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>candle.exe msigen.wix
+light.exe msigen.wixobj
+</code></pre></div></div>
+
+<p>直接双击执行msigen.msi会弹框，启动的calc.exe为system权限</p>
+
+<p>命令行下执行：</p>
+
+<p><code class="language-plaintext highlighter-rouge">msiexec /q /i msigen.msi</code></p>
+
+<p>启动的calc.exe为high权限</p>
+
+<h2 id="0x04-利用token复制获得system权限">0x04 利用token复制获得System权限</h2>
+<hr>
+
+<p>可参考之前的文章：<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Token%E7%AA%83%E5%8F%96%E4%B8%8E%E5%88%A9%E7%94%A8/">《渗透技巧——Token窃取与利用》</a></p>
+
+<p>通过复制system权限的token，使进程获得system权限，常用工具如下：</p>
+
+<h3 id="1incognito">1、incognito</h3>
+
+<p><code class="language-plaintext highlighter-rouge">incognito.exe execute -c "NT AUTHORITY\SYSTEM" cmd.exe</code></p>
+
+<p>下载地址：</p>
+
+<p>https://labs.mwrinfosecurity.com/assets/BlogFiles/incognito2.zip</p>
+
+<h3 id="2invoke-tokenmanipulationps1">2、Invoke-TokenManipulation.ps1</h3>
+
+<p><code class="language-plaintext highlighter-rouge">Invoke-TokenManipulation -CreateProcess "cmd.exe" -Username "nt authority\system"</code></p>
+
+<p>下载地址：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Exfiltration/Invoke-TokenManipulation.ps1</p>
+
+<h3 id="3selectmyparent">3、SelectMyParent</h3>
+
+<p><code class="language-plaintext highlighter-rouge">SelectMyParent.exe cmd.exe 504</code></p>
+
+<p>参考地址：</p>
+
+<p>https://github.com/3gstudent/From-System-authority-to-Medium-authority/blob/master/SelectMyParent.cpp</p>
+
+<p>Author： Didier Stevens</p>
+
+<p><strong>注：</strong></p>
+
+<p>SelectMyParent的原理同xpn开源的代码(PROC_THREAD_ATTRIBUTE_PARENT_PROCESS method)相同，地址如下：</p>
+
+<p>https://gist.github.com/xpn/a057a26ec81e736518ee50848b9c2cd6</p>
+
+<h2 id="0x05-利用capcomsys获得system权限的方法">0x05 利用Capcom.sys获得System权限的方法</h2>
+<hr>
+
+<p>Capcom.sys是游戏公司Capcom的《街头霸王5》中用来反作弊的驱动程序，带有Capcom公司的签名，存在漏洞可以执行内核代码</p>
+
+<p>下载地址：</p>
+
+<p>https://github.com/3gstudent/test/blob/master/Capcom.sys</p>
+
+<p>SHA1: <code class="language-plaintext highlighter-rouge">c1d5cf8c43e7679b782630e93f5e6420ca1749a7</code></p>
+
+<p>适用于Win7x64</p>
+
+<p>1、在当前系统创建服务</p>
+
+<p>需要管理员权限</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sc create Capcom type= kernel binPath= C:\test\Capcom.sys
+sc start Capcom
+</code></pre></div></div>
+<p>2、执行漏洞利用程序</p>
+
+<p>普通用户权限即可</p>
+
+<p>可供参考的的代码：</p>
+
+<p>https://github.com/tandasat/ExploitCapcom</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文对常用的System权限获取方法做了整理，最后感谢xpn的博客和他的开源代码。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on November 22, 2017
+  </div>
+
+  
+</article>

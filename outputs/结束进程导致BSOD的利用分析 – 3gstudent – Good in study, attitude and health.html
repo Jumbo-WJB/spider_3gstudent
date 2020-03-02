@@ -1,0 +1,260 @@
+<article class="post">
+  <h1>结束进程导致BSOD的利用分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>BSOD，全称Blue Screen of Death，即蓝屏死机。
+通常是Ring0级的内核程序出错导致，在提权漏洞中经常遇到。
+而在渗透测试中，某些情况下需要重启系统，例如配置Password Filter DLL，启用Wdigest Auth，重启域控服务器等。</p>
+
+<p>某些条件下，可以选择触发BSOD导致系统重新启动。</p>
+
+<p>那么，是否存在一个稳定的方法触发BSOD呢？更进一步的利用思路呢？如何防御？</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>测试几种结束当前进程导致BSOD的方法</li>
+  <li>修改指定进程，当进程退出后，导致BSOD</li>
+  <li>如何防御</li>
+</ul>
+
+<h2 id="0x02-结束当前进程导致bsod的方法">0x02 结束当前进程导致BSOD的方法</h2>
+<hr>
+
+<p>找到如下参考资料：</p>
+
+<p>https://blog.csdn.net/qq125096885/article/details/52911870</p>
+
+<p>提供多种结束当前进程导致BSOD的方法</p>
+
+<p>经测试，适用Win7系统的方法有以下三种：</p>
+
+<ul>
+  <li>CallRtlSetProcessIsCritical</li>
+  <li>CallNtSetInformationThread</li>
+  <li>CallNtRaiseHardError</li>
+</ul>
+
+<h3 id="1callrtlsetprocessiscritical">1、CallRtlSetProcessIsCritical</h3>
+
+<p>关键代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>RtlSetProcessIsCritical(TRUE, NULL, FALSE);
+</code></pre></div></div>
+
+<p>参考资料：</p>
+
+<p>https://www.codeproject.com/Articles/43405/Protecting-Your-Process-with-RtlSetProcessIsCriti</p>
+
+<p>函数原型：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>NTSTATUS 
+RtlSetProcessIsCritical (
+    BOOLEAN bNew,    	// new setting for process
+    BOOLEAN *pbOld,    	// pointer which receives old setting (can be null)
+    BOOLEAN bNeedScb);    	// need system critical breaks
+</code></pre></div></div>
+
+<p>第一个参数，设置为TRUE时，表示将当前进程标记为critical process；设置为FALSE时，当前进程不是critical process</p>
+
+<h4 id="critical-process">critical process:</h4>
+
+<p>系统进程特有，已知以下系统进程为critical process：</p>
+
+<ul>
+  <li>csrss.exe</li>
+  <li>lsass.exe</li>
+  <li>services.exe</li>
+  <li>smss.exe</li>
+  <li>svchost.exe</li>
+  <li>wininit.exe</li>
+</ul>
+
+<p>当critical process退出时，会导致系统BSOD，所以如果我们将当前进程也设置为critical process，那么在进程退出时同样会导致BSOD</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-7-2/2-1.png" alt="Alt text"></p>
+
+<h3 id="2ntsetinformationprocess">2、NtSetInformationProcess</h3>
+
+<p>关键代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ULONG A = 1;
+NtSetInformationProcess(GetCurrentProcess(), ProcessBreakOnTermination, &amp;A, sizeof(ULONG));
+</code></pre></div></div>
+
+<p>参考资料：</p>
+
+<p>http://undocumented.ntinternals.net/index.html?page=UserMode%2FUndocumented%20Functions%2FNT%20Objects%2FProcess%2FNtSetInformationProcess.html</p>
+
+<p>函数原型：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>NtSetInformationProcess(
+
+  IN HANDLE               ProcessHandle,
+  IN PROCESS_INFORMATION_CLASS ProcessInformationClass,
+  IN PVOID                ProcessInformation,
+  IN ULONG                ProcessInformationLength );
+</code></pre></div></div>
+
+<p>第一个参数表示进程句柄</p>
+
+<p>第二个参数ProcessInformationClass，我在NtQueryInformationProcess的说明中找到了参考，地址如下：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/desktop/api/winternl/nf-winternl-ntqueryinformationprocess</p>
+
+<blockquote>
+  <p>ProcessBreakOnTermination：29，Retrieves a ULONG value indicating whether the process is considered critical.</p>
+</blockquote>
+
+<p>所以ProcessInformationClass设置为29</p>
+
+<p>第三个参数ProcessInformation，设置为TRUE时，表示将当前进程标记为critical process；设置为FALSE时，当前进程不是critical process</p>
+
+<p>第四个参数为长度，即sizeof(ULONG）</p>
+
+<h3 id="3callntraiseharderror">3、CallNtRaiseHardError</h3>
+
+<p>关键代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>typedef enum _HARDERROR_RESPONSE_OPTION {
+	OptionAbortRetryIgnore,
+	OptionOk,
+	OptionOkCancel,
+	OptionRetryCancel,
+	OptionYesNo,
+	OptionYesNoCancel,
+	OptionShutdownSystem
+} HARDERROR_RESPONSE_OPTION, *PHARDERROR_RESPONSE_OPTION;
+
+typedef enum _HARDERROR_RESPONSE {
+	ResponseReturnToCaller,
+	ResponseNotHandled,
+	ResponseAbort,
+	ResponseCancel,
+	ResponseIgnore,
+	ResponseNo,
+	ResponseOk,
+	ResponseRetry,
+	ResponseYes
+} HARDERROR_RESPONSE, *PHARDERROR_RESPONSE;
+
+HARDERROR_RESPONSE OR;
+HARDERROR_RESPONSE_OPTION OP;
+OR = ResponseYes;
+OP = OptionShutdownSystem;
+NtRaiseHardError(0xC0000217, 0, 0, 0, OptionShutdownSystem, &amp;OR);
+</code></pre></div></div>
+
+<p>参考资料：</p>
+
+<p>http://undocumented.ntinternals.net/index.html?page=UserMode%2FUndocumented%20Functions%2FError%2FNtRaiseHardError.html</p>
+
+<p>函数原型：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>NtRaiseHardError(
+
+  IN NTSTATUS             ErrorStatus,
+  IN ULONG                NumberOfParameters,
+  IN PUNICODE_STRING      UnicodeStringParameterMask OPTIONAL,
+  IN PVOID                *Parameters,
+  IN HARDERROR_RESPONSE_OPTION ResponseOption,
+  OUT PHARDERROR_RESPONSE Response );
+</code></pre></div></div>
+
+<p>这个函数在处理异常时用于产生应用程序错误对话框，通常用法是弹出对话框提示用户是否要终止进程，但我们如果把参数设置为0xC0000217，OptionShutdownSystem和ResponseYes，那么会导致BSOD，提示0xC0000217</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-7-2/2-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>ErrorStatus也可以为其他值，可参考NTSTATUS的说明，地址如下：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/cc704588.aspx</p>
+
+<p>选择代表失败函数的值即可，例如0xC000000C(STATUS_TIMER_NOT_CANCELED)、0xC0000216(STATUS_NOT_SERVER_SESSION)、0xC0000219(STATUS_DEBUG_ATTACH_FAILED)</p>
+
+<h2 id="0x03-结束指定进程导致bsod的方法">0x03 结束指定进程导致BSOD的方法</h2>
+<hr>
+
+<p>以上三个函数，只有NtSetInformationProcess支持传入进程句柄</p>
+
+<p>接下来，我们只要能够获得指定进程的句柄，传入NtSetInformationProcess即可实现结束指定进程导致BSOD</p>
+
+<p>思路如下：</p>
+
+<ul>
+  <li>提升至Debug权限</li>
+  <li>通过OpenProcess打开指定的进程，获得进程句柄</li>
+  <li>调用CallNtSetInformationProcess将指定进程设置为critical process</li>
+</ul>
+
+<p>完整代码可参考如下链接：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/SetProcessCritical.cpp</p>
+
+<p>代码还支持将指定进程从critical process设置为正常进程</p>
+
+<h2 id="0x04-防御思路">0x04 防御思路</h2>
+<hr>
+
+<p>为了避免这种情况的发生，我们在结束进程时，需要先查看该进程是否为critical process，如果是critical process，需要设置为正常进程后再结束</p>
+
+<p>这里就涉及到查询进程是否为critical process</p>
+
+<p>需要使用内核API NtQueryInformationProcess查询ProcessBreakOnTermination，获得进程信息</p>
+
+<p>关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>status = NtQueryInformationProcess(hProcess, ProcessBreakOnTermination, &amp;breakOnTermination, sizeof(ULONG), NULL);
+if(status&lt;0)
+	printf("[!]NtQueryInformationProcess error\n");
+if(breakOnTermination ==1)
+	printf("[+]The process is critical");
+else
+	printf("[!]The process is not critical");
+</code></pre></div></div>
+
+<p>完整代码可参考如下链接：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/CheckCriticalProess.cpp</p>
+
+<p>代码实现了查询指定进程是否为critical process</p>
+
+<p>在实际应用上，通过会查询当前系统的所有进程是否存在critical process</p>
+
+<p>在代码实现上，可通过EnumProcesses所有进程PID，接着做进一步查询</p>
+
+<p>完整代码可参考如下链接：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/FindCriticalProcess.cpp</p>
+
+<p>代码实现了查询当前系统的所有进程，过滤掉系统进程，标记出critical process</p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文测试了三种结束当前进程导致BSOD的方法，进一步介绍了结束指定进程导致BSOD的方法，结合利用思路，分析防御方法，编写程序实现了查询当前系统所有进程并标记出critical process，在结束critical process前将其设置为正常进程，能够避免系统出现BOSD</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on July  2, 2018
+  </div>
+
+  
+</article>

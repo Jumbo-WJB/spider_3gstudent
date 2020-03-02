@@ -1,0 +1,312 @@
+<article class="post">
+  <h1>渗透技巧——Windows系统的文件恢复与删除</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试中，文件的恢复和删除好比矛与盾。</p>
+
+<p>文件恢复是指恢复目标系统已删除的文件，而文件删除是指删除在目标系统上使用过的工具，避免被恢复。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>文件删除的原理</li>
+  <li>文件恢复的原理</li>
+  <li>利用PowerForensics恢复文件</li>
+  <li>利用SDelete删除文件</li>
+  <li>利用SDelete删除文件后，能否使用PowerForensics恢复</li>
+  <li>通过文件覆盖，防止文件被恢复</li>
+  <li>枚举所有进程，搜索指定文件的句柄，释放该句柄，解除文件占用，实现文件删除</li>
+  <li>程序实现细节和开源代码</li>
+</ul>
+
+<h2 id="0x02-文件删除与恢复的原理">0x02 文件删除与恢复的原理</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>http://www.ntfs.com/ntfs_basics.htm</p>
+
+<h3 id="基本概念">基本概念</h3>
+
+<p>Windows文件系统大都使用NTFS（New Technology File System）技术</p>
+
+<p>NTFS中每个文件对应一个主文件表(Master File Table，MFT)</p>
+
+<p>MFT作为文件索引，存储文件的属性</p>
+
+<h4 id="文件删除的直观理解">文件删除的直观理解：</h4>
+
+<p>只修改了MFT(即文件属性)，没有修改删除文件的内容</p>
+
+<h4 id="文件恢复的直观理解">文件恢复的直观理解：</h4>
+
+<p>恢复文件的MFT即可</p>
+
+<h3 id="简单测试">简单测试</h3>
+
+<p>新建文件test.txt，写入内容<code class="language-plaintext highlighter-rouge">0123456789</code></p>
+
+<p>使用工具：WinHex</p>
+
+<p>下载地址：</p>
+
+<p>http://www.x-ways.net/winhex/</p>
+
+<p>选择<code class="language-plaintext highlighter-rouge">Tools</code> -&gt; <code class="language-plaintext highlighter-rouge">Open Disk</code>，选择盘符</p>
+
+<p>找到文件test.txt，右键 -&gt; <code class="language-plaintext highlighter-rouge">Navigation</code> -&gt; <code class="language-plaintext highlighter-rouge">Seek FILE Record</code></p>
+
+<p>查看test.txt的MFT信息，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-30/2-1.png" alt="Alt text"></p>
+
+<p>MFT的结构如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-30/2-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>图片截取自http://www.blogfshare.com/detail-ntfs-filesys.html</p>
+
+<p>接下来删除文件test.txt，并且清空回收站的文件</p>
+
+<p>使用WinHex再次查看硬盘内容，关闭当前盘符，重新选择<code class="language-plaintext highlighter-rouge">Tools</code> -&gt; <code class="language-plaintext highlighter-rouge">Open Disk</code>，选择盘符</p>
+
+<p>弹框提示，选择更新快照，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-30/2-3.png" alt="Alt text"></p>
+
+<p>再次查看MFT结构，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-6-30/2-4.png" alt="Alt text"></p>
+
+<p>经对比发现，区别如下：</p>
+
+<ul>
+  <li>偏移0x08</li>
+  <li>偏移0x10，数值加1</li>
+  <li>偏移0x16，由1变为0</li>
+</ul>
+
+<p>在WinHex界面中选择恢复文件，成功恢复文件</p>
+
+<p><strong>注：</strong></p>
+
+<p>恢复成功的前提是该文件尚未被覆盖</p>
+
+<p>综上，文件恢复的原理可以简单理解如下：</p>
+
+<p><strong>文件删除操作仅修改了文件的MFT，如果文件内容尚未被覆盖，就能恢复文件</strong></p>
+
+<h2 id="0x03-利用powerforensics恢复文件">0x03 利用PowerForensics恢复文件</h2>
+<hr>
+
+<p>文件恢复软件有多种，这里给出一个通过powershell实现文件恢复的工具：PowerForensics</p>
+
+<p>工程地址：</p>
+
+<p>https://github.com/Invoke-IR/PowerForensics/</p>
+
+<p>下载地址：</p>
+
+<p>https://github.com/Invoke-IR/PowerForensics/releases</p>
+
+<p><strong>注：</strong></p>
+
+<p>PowerForensicsv2.zip对应Powershell v2，为Win7和Sever2008默认版本</p>
+
+<p>工具使用方法可直接参考xpn的博客：</p>
+
+<p>https://blog.xpnsec.com/offensive-forensics/</p>
+
+<p>获得所有可供恢复的文件列表，powershell命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>powershell -executionpolicy bypass
+import-module .\PowerForensicsv2.psd1
+Get-ForensicFileRecord | Where {$_.Deleted -eq $true} | Select FullName
+</code></pre></div></div>
+
+<p>恢复指定的文件<code class="language-plaintext highlighter-rouge">C:\test.txt</code>，保存为<code class="language-plaintext highlighter-rouge">recovered.txt</code>：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$file = Get-ForensicFileRecord | Where {$_.FullName -eq "C:\test.txt"}
+$file.CopyFile("recovered.txt")
+</code></pre></div></div>
+
+<h2 id="0x04-防止文件被恢复">0x04 防止文件被恢复</h2>
+<hr>
+
+<h3 id="1使用工具sdelete">1、使用工具SDelete</h3>
+
+<p>下载地址：</p>
+
+<p>https://docs.microsoft.com/en-us/sysinternals/downloads/sdelete</p>
+
+<p>删除命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sdelete64.exe -accepteula C:\test.txt
+</code></pre></div></div>
+
+<h3 id="2通过c实现">2、通过c++实现</h3>
+
+<p>经过0x01的原理分析，我们知道，只要覆盖原文件即可避免文件被恢复</p>
+
+<h4 id="最简单的实现思路">最简单的实现思路：</h4>
+
+<p>修改原文件的内容，填充随机字符串，然后再删除文件</p>
+
+<p>我写了一个简单的测试代码，将待删除的文件内容先填充为0，再删除文件，即使文件被恢复，内容也全是0，可供参考的c代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;windows.h&gt;
+int main(int argc, char *argv[])
+{
+	if (argc != 2)
+	{
+		printf("\nOverwrite the file,avoid being restored\n\n");
+		printf("Usage:\n");
+		printf("%s &lt;File Path&gt;\n",argv[0]);
+		return 0;
+	}
+	printf("[*]Try to overwrite file &lt;%s&gt;   ", argv[1]);
+	FILE* fp;
+	int err = fopen_s(&amp;fp, argv[1], "rb+");
+	if (err != 0)
+	{
+		printf("\n[!]Openfile error!");
+		return 0;
+	}
+	fseek(fp, 0, SEEK_END);
+	int len = ftell(fp);
+	char *buf = new char[len];
+	memset(buf, 0, len);
+	fclose(fp);
+	err = fopen_s(&amp;fp, argv[1], "wb+");
+	if (err != 0)
+	{
+		printf("\n[!]Openfile error!");
+		return 0;
+	}
+	fwrite(buf, len, 1, fp);
+	fclose(fp);
+	printf("done\n");
+
+	printf("[*]Try to delete file   &lt;%s&gt;   ", argv[1]);
+	if(DeleteFile(argv[1])!=0)
+		printf("done\n");
+	else
+		printf("error\n");
+	return 0;
+}
+</code></pre></div></div>
+
+<h2 id="0x05-解除文件占用">0x05 解除文件占用</h2>
+<hr>
+
+<p>在实际删除文件的时候，常常会碰到文件被占用导致无法删除的情况</p>
+
+<p>这里需要找到占用文件的进程，获得文件句柄，释放句柄后才能删除文件</p>
+
+<p>实现思路如下：</p>
+
+<ul>
+  <li>程序提升至debug权限</li>
+  <li>枚举所有进程</li>
+  <li>获得指定文件的句柄</li>
+  <li>释放该句柄</li>
+</ul>
+
+<p>具体对应到程序实现上，需要注意以下问题：</p>
+
+<h3 id="1提升至debug权限">1、提升至debug权限</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>BOOL EnableDebugPrivilege(BOOL fEnable)
+{
+	BOOL fOk = FALSE;
+	HANDLE hToken;
+	if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &amp;hToken))
+	{
+		TOKEN_PRIVILEGES tp;
+		tp.PrivilegeCount = 1;
+		LookupPrivilegeValue(NULL, SE_DEBUG_NAME, &amp;tp.Privileges[0].Luid);
+		tp.Privileges[0].Attributes = fEnable ? SE_PRIVILEGE_ENABLED : 0;
+		AdjustTokenPrivileges(hToken, FALSE, &amp;tp, sizeof(tp), NULL, NULL);
+		fOk = (GetLastError() == ERROR_SUCCESS);
+		CloseHandle(hToken);
+	}
+	return(fOk);
+}
+</code></pre></div></div>
+
+<h3 id="2枚举所有进程获得指定文件的句柄">2、枚举所有进程，获得指定文件的句柄</h3>
+
+<p>使用内核API NtQuerySystemInformation查询SystemHandleInformation，获得所有进程的句柄</p>
+
+<p>筛选出类型为文件的句柄： <code class="language-plaintext highlighter-rouge">ObjectTypeNumber = 0x1e</code></p>
+
+<p>如果无法打开句柄对应的进程，留下标志位，不再重复打开该进程</p>
+
+<p>过滤出有可能导致挂起的句柄，利用API WaitForSingleObject进行判断</p>
+
+<h3 id="3释放句柄">3、释放句柄</h3>
+
+<p>使用内核API NtQuerySystemInformation查询SystemHandleInformation得到的句柄是伪句柄，无法直接释放</p>
+
+<p>需要使用API DuplicateHandle将伪句柄转为实句柄</p>
+
+<p>函数模型如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>BOOL WINAPI DuplicateHandle(
+  _In_  HANDLE   hSourceProcessHandle,
+  _In_  HANDLE   hSourceHandle,
+  _In_  HANDLE   hTargetProcessHandle,
+  _Out_ LPHANDLE lpTargetHandle,
+  _In_  DWORD    dwDesiredAccess,
+  _In_  BOOL     bInheritHandle,
+  _In_  DWORD    dwOptions
+);
+</code></pre></div></div>
+
+<p>第7个参数设置为DUPLICATE_CLOSE_SOURCE，表示会释放源进程中的句柄</p>
+
+<p>具体参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>DuplicateHandle(processHandle, (HANDLE)handle.Handle, GetCurrentProcess(), &amp;dupHandle, 0, 0, DUPLICATE_CLOSE_SOURCE)
+</code></pre></div></div>
+
+<p>完整代码已开源，地址如下：</p>
+
+<p>https://github.com/3gstudent/Catch-specified-file-s-handle</p>
+
+<p>代码实现了枚举当前系统的所有进程，找到指定文件的句柄，对其释放</p>
+
+<p>不仅可以用来解除文件占用，而且可以用来禁用日志的某些功能</p>
+
+<p>例如如果释放了system.evtx的句柄，那么日志服务无法向system.evtx写入日志，导致system.evtx下的日志失效</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文简单介绍了文件删除与恢复的原理，测试工具，编写程序利用文件覆盖防止文件被恢复，并且解决了文件占用的问题，开源代码。</p>
+
+<p>站在渗透的角度，一是想办法恢复目标系统的文件，二是安全删除自己的工具，避免被恢复。</p>
+
+<p>站在防御的角度，清除重要的文件可使用工具SDelete进行安全删除</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on June 30, 2018
+  </div>
+
+  
+</article>

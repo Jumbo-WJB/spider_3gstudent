@@ -1,0 +1,276 @@
+<article class="post">
+  <h1>Windows本地提权工具Juicy Potato测试分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Juicy Potato是一款Windows系统的本地提权工具，是在工具RottenPotatoNG的基础上做了扩展，适用条件更广</p>
+
+<p>利用的前提是获得了SeImpersonate或者SeAssignPrimaryToken权限，通常在webshell下使用</p>
+
+<p>那么，Juicy Potato的使用方法有哪些，有哪些限制条件呢？本文将对其进行测试，根据原理分析限制条件</p>
+
+<p>Juicy Potato的下载地址：</p>
+
+<p>https://github.com/ohpe/juicy-potato</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本将要介绍以下内容：</p>
+
+<ul>
+  <li>实现原理</li>
+  <li>对RottenPotatoNG的扩展</li>
+  <li>枚举可用COM对象的方法</li>
+  <li>使用方法</li>
+  <li>限制条件</li>
+  <li>防御思路</li>
+</ul>
+
+<h2 id="0x02-实现原理">0x02 实现原理</h2>
+<hr>
+
+<p>参考资料：</p>
+
+<p>https://foxglovesecurity.com/2016/09/26/rotten-potato-privilege-escalation-from-service-accounts-to-system/</p>
+
+<p>根据个人理解介绍实现原理</p>
+
+<p>需要理解的几个知识：</p>
+
+<ol>
+  <li>使用DCOM时，如果以服务的方式远程连接，那么权限为System，例如BITS服务</li>
+  <li>使用DCOM可以通过TCP连接到本机的一个端口，发起NTLM认证，该认证可以被重放</li>
+  <li>LocalService用户默认具有SeImpersonate和SeAssignPrimaryToken权限</li>
+  <li>开启SeImpersonate权限后，能够在调用CreateProcessWithToken时，传入新的Token创建新的进程</li>
+  <li>开启SeAssignPrimaryToken权限后，能够在调用CreateProcessAsUser时，传入新的Token创建新的进程</li>
+</ol>
+
+<p>Juicy Potato的实现流程如下：</p>
+
+<h4 id="1加载com发出请求权限为system">1、加载COM，发出请求，权限为System</h4>
+
+<p>在指定ip和端口的位置尝试加载一个COM对象</p>
+
+<p>RottenPotatoNG使用的COM对象为BITS，CLSID为<code class="language-plaintext highlighter-rouge">{4991d34b-80a1-4291-83b6-3328366b9097}</code></p>
+
+<p>可供选择的COM对象不唯一，Juicy Potato提供了多个，详细列表可参考如下地址：</p>
+
+<p>https://github.com/ohpe/juicy-potato/blob/master/CLSID/README.md</p>
+
+<h4 id="2回应步骤1的请求发起ntlm认证">2、回应步骤1的请求，发起NTLM认证</h4>
+
+<p>正常情况下，由于权限不足，当前权限不是System，无法认证成功</p>
+
+<h4 id="3针对本地端口同样发起ntlm认证权限为当前用户">3、针对本地端口，同样发起NTLM认证，权限为当前用户</h4>
+
+<p>由于权限为当前用户，所以NTLM认证能够成功完成</p>
+
+<p>RottenPotatoNG使用的135端口</p>
+
+<p>Juicy Potato支持指定任意本地端口，但是RPC一般默认为135端口，很少被修改</p>
+
+<h4 id="4分别拦截两个ntlm认证的数据包替换数据通过ntlm重放使得步骤1权限为system的ntlm认证通过获得system权限的token">4、分别拦截两个NTLM认证的数据包，替换数据，通过NTLM重放使得步骤1(权限为System)的NTLM认证通过，获得System权限的Token</h4>
+
+<p>重放时需要注意NTLM认证的NTLM Server Challenge不同，需要修正</p>
+
+<h4 id="5利用system权限的token创建新进程">5、利用System权限的Token创建新进程</h4>
+
+<p>如果开启SeImpersonate权限，调用CreateProcessWithToken，传入System权限的Token，创建的进程为System权限</p>
+
+<p>或者</p>
+
+<p>如果开启SeAssignPrimaryToken权限，调用CreateProcessAsUser，传入System权限的Token，创建的进程为System权限</p>
+
+<p><strong>注：</strong></p>
+
+<p>详细说明可参考之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Windows-Token%E4%B9%9D%E7%A7%8D%E6%9D%83%E9%99%90%E7%9A%84%E5%88%A9%E7%94%A8/">《渗透技巧——Windows Token九种权限的利用》</a></p>
+
+<p><strong>利用的关键：</strong></p>
+
+<p>当前用户支持SeImpersonate或者SeAssignPrimaryToken权限</p>
+
+<p>以下用户具有该权限：</p>
+
+<ul>
+  <li>本地管理员组成员和本地服务帐户</li>
+  <li>由服务控制管理器启动的服务</li>
+  <li>由组件对象模型 (COM) 基础结构启动的并配置为在特定帐户下运行的COM服务器</li>
+</ul>
+
+<p>针对提权的话，主要是第三类用户，常见的为LocalService用户，例如IIS和者sqlserver的用户</p>
+
+<h2 id="0x03-枚举可用com对象的方法">0x03 枚举可用COM对象的方法</h2>
+<hr>
+
+<p>Juicy Potato提供了枚举可用COM对象的方法，步骤如下：</p>
+
+<h4 id="1获得可用clsid的列表">1、获得可用CLSID的列表</h4>
+
+<p>使用GetCLSID.ps1，地址如下：</p>
+
+<p>https://github.com/ohpe/juicy-potato/blob/master/CLSID/GetCLSID.ps1</p>
+
+<p><strong>注：</strong></p>
+
+<p>使用时同级目录下需要包含支持文件<code class="language-plaintext highlighter-rouge">.\utils\Join-Object.ps1</code></p>
+
+<p>执行成功后生成文件<code class="language-plaintext highlighter-rouge">CLSID.list</code>和<code class="language-plaintext highlighter-rouge">CLSID.csv</code></p>
+
+<h4 id="2使用批处理调用juicypotatoexe逐个测试clsid">2、使用批处理调用juicypotato.exe逐个测试CLSID</h4>
+
+<p>批处理地址如下：</p>
+
+<p>https://github.com/ohpe/juicy-potato/blob/master/Test/test_clsid.bat</p>
+
+<p>juicypotato.exe的参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>juicypotato.exe -z -l !port! -c %%i &gt;&gt; result.log
+</code></pre></div></div>
+
+<p>-z表示测试模式，只验证Token，不使用Token创建进程</p>
+
+<p>-l为端口，起始为1000，每次循环加1</p>
+
+<p>-c为从文件CLSID.list获得的CLSID</p>
+
+<p>Juicy Potato已经测试了如下Windows系统：</p>
+
+<ul>
+  <li>Windows 7 Enterprise</li>
+  <li>Windows 8.1 Enterprise</li>
+  <li>Windows 10 Enterprise</li>
+  <li>Windows 10 Professional</li>
+  <li>Windows Server 2008 R2 Enterprise</li>
+  <li>Windows Server 2012 Datacenter</li>
+  <li>Windows Server 2016 Standard</li>
+</ul>
+
+<p>我在测试的过程中，在Server2012下执行GetCLSID.ps1时会报错，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-9-1/4-1.png" alt="Alt text"></p>
+
+<p>出错在位置在<code class="language-plaintext highlighter-rouge">.\utils\Join-Object.ps1</code></p>
+
+<p>这里给出一种修改方法：</p>
+
+<h4 id="1枚举所有满足条件的clsid">1、枚举所有满足条件的CLSID</h4>
+
+<p>powershell代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>New-PSDrive -Name HKCR -PSProvider Registry -Root HKEY_CLASSES_ROOT | Out-Null
+$CLSID = Get-ItemProperty HKCR:\clsid\* | select-object AppID,@{N='CLSID'; E={$_.pschildname}} | where-object {$_.appid -ne $null}
+foreach($a in $CLSID)
+{
+	Write-Host $a.CLSID
+}
+</code></pre></div></div>
+
+<p>可以选择将结果保存为<code class="language-plaintext highlighter-rouge">CLSID.list</code></p>
+
+<h4 id="2使用批处理调用juicypotatoexe逐个验证">2、使用批处理调用juicypotato.exe逐个验证</h4>
+
+<p>地址如下：</p>
+
+<p>https://github.com/ohpe/juicy-potato/blob/master/Test/test_clsid.bat</p>
+
+<p>bat脚本不需要做修改</p>
+
+<h2 id="0x04-使用方法">0x04 使用方法</h2>
+<hr>
+
+<h3 id="1查看当前用户权限是否符合要求">1、查看当前用户权限，是否符合要求</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>whoami /priv
+</code></pre></div></div>
+
+<p>如果开启SeImpersonate权限，juicypotato的参数可以使用<code class="language-plaintext highlighter-rouge">-t t</code></p>
+
+<p>如果开启SeAssignPrimaryToken权限，juicypotato的参数可以使用<code class="language-plaintext highlighter-rouge">-t u</code></p>
+
+<p>如果均开启，可以选择<code class="language-plaintext highlighter-rouge">-t *</code></p>
+
+<p>如果均未开启，那么无法提权</p>
+
+<h3 id="2查看rpc默认端口是否为135">2、查看RPC默认端口是否为135</h3>
+
+<p>如果被修改(例如为111)，juicypotato的参数可以使用<code class="language-plaintext highlighter-rouge">-n 111</code></p>
+
+<p>如果系统禁用了RPC，并不是一定无法提权，需要满足如下条件：</p>
+
+<p>找到另一系统，能够以当前用户的权限进行远程RPC登录，此时juicypotato的参数可以使用<code class="language-plaintext highlighter-rouge">-k &lt;ip&gt;</code></p>
+
+<p>例如Win7、WIn8系统，默认配置下，允许135端口的入站规则即可进行远程RPC登录</p>
+
+<p>添加防火墙规则允许135端口入站的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>netsh advfirewall firewall add rule name="135" protocol=TCP dir=in localport=135 action=allow
+</code></pre></div></div>
+
+<p>也可以选择将防火墙关闭，可参考绕过UAC关闭防火墙的代码：</p>
+
+<p>https://github.com/3gstudent/Use-COM-objects-to-bypass-UAC/blob/master/DisableFirewall.cpp</p>
+
+<h3 id="3根据操作系统选择可用的clsid">3、根据操作系统选择可用的CLSID</h3>
+
+<p>参考列表</p>
+
+<p>https://github.com/ohpe/juicy-potato/blob/master/CLSID/README.md</p>
+
+<p>例如测试系统Server2012，选择CLSID为<code class="language-plaintext highlighter-rouge">{8BC3F05E-D86B-11D0-A075-00C04FB68820}</code></p>
+
+<h3 id="4选择一个系统未占用的端口作为监听端口">4、选择一个系统未占用的端口作为监听端口</h3>
+
+<p>例如，最终参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>JuicyPotato.exe -t t -p c:\windows\system32\cmd.exe -l 1111 -c {8BC3F05E-D86B-11D0-A075-00C04FB68820}
+</code></pre></div></div>
+
+<p>表示开启SeImpersonate权限创建进程，监听端口1111，使用的CLSID为<code class="language-plaintext highlighter-rouge">{8BC3F05E-D86B-11D0-A075-00C04FB68820}</code></p>
+
+<h2 id="0x05-限制条件">0x05 限制条件</h2>
+<hr>
+
+<p>经过以上的分析，Juicy Potato的限制条件如下：</p>
+
+<ul>
+  <li>需要支持SeImpersonate或者SeAssignPrimaryToken权限</li>
+  <li>开启DCOM</li>
+  <li>本地支持RPC或者远程服务器支持PRC并能成功登录</li>
+  <li>能够找到可用的COM对象</li>
+</ul>
+
+<h2 id="0x06-防御思路">0x06 防御思路</h2>
+<hr>
+
+<p>站在防御的角度，服务器禁用DCOM，禁用RPC，或者为每一个COM对象配置属性均不现实</p>
+
+<p>针对Juicy Potato的关键在于权限的控制，阻止攻击者获得SeImpersonate或者SeAssignPrimaryToken权限</p>
+
+<h2 id="0x07-补充">0x07 补充</h2>
+<hr>
+
+<p>更多学习资料：</p>
+
+<p>https://bugs.chromium.org/p/project-zero/issues/detail?id=325&amp;redir=1</p>
+
+<h2 id="0x08-小结">0x08 小结</h2>
+<hr>
+
+<p>本文对Juicy Potato进行测试，总结使用方法，同RottenPotatoNG进行比较，分析原理，找到限制条件和防御思路</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on September 10, 2018
+  </div>
+
+  
+</article>

@@ -1,0 +1,237 @@
+<article class="post">
+  <h1>Linux下的密码Hash——加密方式与破解方法的技术整理</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>Linux系统下，用户的密码会被加密保存在文件<code class="language-plaintext highlighter-rouge">/etc/shadow</code>中，关于密码的加密方式与破解方法有哪些呢？本文尝试对这一部分内容进行整理，介绍相关基础知识，测试常用方法，帮助大家对此有更直观的认识。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>Linux下用户密码的保存格式</li>
+  <li>Linux下用户密码的加密方法</li>
+  <li>破解用户密码hash的常用工具和方法</li>
+</ul>
+
+<h2 id="0x02-linux下用户密码的保存格式">0x02 Linux下用户密码的保存格式</h2>
+<hr>
+
+<p>Linux密码信息保存在两个文件中，分别为：<code class="language-plaintext highlighter-rouge">/etc/passwd</code>和<code class="language-plaintext highlighter-rouge">/etc/shadow</code></p>
+
+<h3 id="etcpasswd">/etc/passwd:</h3>
+
+<p>普通用户权限能够查看</p>
+
+<p>保存用户信息，每一行代表一个用户，每一行通过冒号<code class="language-plaintext highlighter-rouge">：</code>分为七个部分</p>
+
+<ol>
+  <li>用户名</li>
+  <li>密码，x表示密码保存在<code class="language-plaintext highlighter-rouge">/etc/shadow</code></li>
+  <li>UID，0代表root</li>
+  <li>GID，表示所在组</li>
+  <li>描述信息，依次为Full Name、Room Number、Work Phone、Home Phone和Other</li>
+  <li>用户主目录</li>
+  <li>默认shell类型</li>
+</ol>
+
+<p><strong>eg.</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">test2:x:1001:1001:test2,11111,111111-11,222222-22,test:/home/test2:/bin/bash</code></p>
+
+<ul>
+  <li>用户名：test2</li>
+  <li>密码保存在<code class="language-plaintext highlighter-rouge">/etc/shadow</code></li>
+  <li>UID为1001</li>
+  <li>GID为1001</li>
+  <li>描述信息：
+  Full Name []: test2
+  Room Number []: 11111
+  Work Phone []: 111111-11
+  Home Phone []: 222222-22
+  Other []: test</li>
+  <li>用户主目录为<code class="language-plaintext highlighter-rouge">/home/test2</code></li>
+  <li>默认shell为<code class="language-plaintext highlighter-rouge">/bin/bash</code></li>
+</ul>
+
+<h3 id="etcshadow">/etc/shadow:</h3>
+
+<p>只有root用户权限能够查看</p>
+
+<p>保存加密后的密码和用户的相关密码信息，每一行代表一个用户，每一行通过冒号<code class="language-plaintext highlighter-rouge">：</code>分为九个部分</p>
+
+<ol>
+  <li>用户名</li>
+  <li>加密后的密码</li>
+  <li>上次修改密码的时间(从1970.1.1开始的总天数)</li>
+  <li>两次修改密码间隔的最少天数，如果为0，则没有限制</li>
+  <li>两次修改密码间隔最多的天数,表示该用户的密码会在多少天后过期，如果为99999则没有限制</li>
+  <li>提前多少天警告用户密码将过期</li>
+  <li>在密码过期之后多少天禁用此用户</li>
+  <li>用户过期日期(从1970.1.1开始的总天数)，如果为0，则该用户永久可用</li>
+  <li>保留</li>
+</ol>
+
+<p><strong>注：</strong></p>
+
+<p>参数说明可通过<code class="language-plaintext highlighter-rouge">man shadow</code>获取</p>
+
+<p><strong>eg.</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">test2:$6$C/vGzhVe$aKK6QGdhzTmYyxp8.E68gCBkPhlWQ4W7/OpCFQYV.qsCtKaV00bToWh286yy73jedg6i0qSlZkZqQy.wmiUdj0:17470:0:99999:7:::</code></p>
+
+<ul>
+  <li>用户名：test2</li>
+  <li>加密后的密码：<code class="language-plaintext highlighter-rouge">$6$C/vGzhVe$aKK6QGdhzTmYyxp8.E68gCBkPhlWQ4W7/OpCFQYV.qsCtKaV00bToWh286yy73jedg6i0qSlZkZqQy.wmiUdj0</code></li>
+  <li>上次修改密码的时间(从1970.1.1开始的总天数为17470)</li>
+  <li>两次修改密码间隔：没有限制</li>
+  <li>两次修改密码间隔最多的天数：没有限制</li>
+  <li>提前7天警告用户密码将过期</li>
+  <li>该用户永久可用</li>
+</ul>
+
+<p>由示例可知，加密的密码具有固定格式：</p>
+
+<p><code class="language-plaintext highlighter-rouge">$id$salt$encrypted</code></p>
+
+<p>id表示加密算法，1代表<code class="language-plaintext highlighter-rouge">MD5</code>，5代表<code class="language-plaintext highlighter-rouge">SHA-256</code>，6代表<code class="language-plaintext highlighter-rouge">SHA-512</code>
+salt表示密码学中的Salt,系统随机生成
+encrypted表示密码的hash</p>
+
+<h2 id="0x03-破解用户密码hash的常用工具和方法">0x03 破解用户密码hash的常用工具和方法</h2>
+<hr>
+
+<p>由于Linux的密码加密使用了Salt,所以无法使用彩虹表的方式进行破解,常用的方法为字典破解和暴力破解</p>
+
+<p>字典破解和暴力破解的常用工具：</p>
+
+<h3 id="1john-the-ripper">1、John the Ripper</h3>
+
+<h4 id="1-字典破解">(1) 字典破解</h4>
+
+<p>Kali2.0集成了John the Ripper</p>
+
+<p>字典文件位于<code class="language-plaintext highlighter-rouge">/usr/share/john/password.lst</code></p>
+
+<p>使用Kali Linux上的John自带的密码列表。路径为<code class="language-plaintext highlighter-rouge">/usr/share/john/password.lst</code></p>
+
+<p>使用字典破解：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>john --wordlist=/usr/share/john/password.lst ./shadow 
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>也可使用其他字典</p>
+
+<h4 id="2-暴力破解">(2) 暴力破解：</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>john ./shadow 
+</code></pre></div></div>
+
+<p>列出已破解的明文密码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>john --show ./shadow 
+</code></pre></div></div>
+
+<p>结果如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-30/2-1.png" alt="Alt text"></p>
+
+<h3 id="2hashcat">2、hashcat</h3>
+
+<p>Kali2.0集成了hashcat</p>
+
+<p>字典文件使用<code class="language-plaintext highlighter-rouge">/usr/share/john/password.lst</code></p>
+
+<p>修改hash格式：只保留<code class="language-plaintext highlighter-rouge">$salt$encrypted</code></p>
+
+<p><strong>eg.</strong></p>
+
+<p>原hash：</p>
+
+<p><code class="language-plaintext highlighter-rouge">test2:$6$C/vGzhVe$aKK6QGdhzTmYyxp8.E68gCBkPhlWQ4W7/OpCFQYV.qsCtKaV00bToWh286yy73jedg6i0qSlZkZqQy.wmiUdj0:17470:0:99999:7:::</code></p>
+
+<p>修改后：</p>
+
+<p><code class="language-plaintext highlighter-rouge">$6$C/vGzhVe$aKK6QGdhzTmYyxp8.E68gCBkPhlWQ4W7/OpCFQYV.qsCtKaV00bToWh286yy73jedg6i0qSlZkZqQy.wmiUdj0</code></p>
+
+<h4 id="1-字典破解-1">(1) 字典破解：</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 1800 -o found1.txt --remove shadow /usr/share/john/password.lst 
+</code></pre></div></div>
+
+<p>参数说明：</p>
+
+<p>-m：hash-type，1800对应<code class="language-plaintext highlighter-rouge">SHA-512 </code>
+详细参数可查表：https://hashcat.net/wiki/doku.php?id=example_hashes
+-o：输出文件
+–remove：表示hash被破解后将从hash文件移除
+shadow：代表hash文件
+/usr/share/john/password.lst：代表字典文件</p>
+
+<p>成功破解出2个hash，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-30/2-2.png" alt="Alt text"></p>
+
+<h4 id="2-暴力破解-1">(2) 暴力破解：</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 1800 -a 3 -o found2.txt shadow ?l?l?l?l --force
+</code></pre></div></div>
+
+<p>参数说明：
+-a：attack-mode，默认为0，3代表Brute-force，即暴力破解
+?l：表示小写字母，即abcdefghijklmnopqrstuvwxyz，4个?l代表暴力破解的长度为4
+?u：表示大写字母，即ABCDEFGHIJKLMNOPQRSTUVWXYZ
+?h：代表十六进制字符小写，即0123456789
+?H：代表十六进制字符大写，即0123456789abcdef
+?s：表示特殊符号，即!”#$%&amp;’()*+,-./:;&lt;=&gt;?@[]^_`{|}~
+?a：表示所有字符，即?l?u?d?s
+?b：表示十六进制，即0x00 - 0xff</p>
+
+<p>成功暴力破解出hash，结果如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-10-30/2-3.png" alt="Alt text"></p>
+
+<h3 id="3在线网站">3、在线网站</h3>
+
+<p>1.https://hce.iteknical.com/</p>
+
+<p>HCE分布式计算平台,需要积分才能使用</p>
+
+<p>2.http://www.cmd5.com/</p>
+
+<p>目前暂不支持SHA-512</p>
+
+<h3 id="4mimipenguin">4、mimipenguin</h3>
+
+<p>下载地址：</p>
+
+<p>https://github.com/huntergregal/mimipenguin</p>
+
+<p>原理类似于mimikatz，通过内存导出明文密码</p>
+
+<h2 id="0x04-小结">0x04 小结</h2>
+<hr>
+
+<p>本文介绍了Linux下的密码保存格式，测试了两款常用工具：John the Ripper和hashcat，分别使用字典和暴力两种破解方法。</p>
+
+<p>作为一篇总结基础知识的文章，希望能够尽可能的做到简洁实用，欢迎读者补充，后续也会对这部分内容不断进行完善。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on October 30, 2017
+  </div>
+
+  
+</article>

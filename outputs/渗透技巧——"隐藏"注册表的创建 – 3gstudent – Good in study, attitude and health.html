@@ -1,0 +1,290 @@
+<article class="post">
+  <h1>渗透技巧——"隐藏"注册表的创建</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>知名恶意软件Poweliks曾使用过的一个后门技术，在注册表启动位置创建一个特殊的注册表键值，通过mshta来执行payload</p>
+
+<p>对于这个特殊的注册表键值，在正常情况下无法对其访问，这其中的原理是什么呢?如何读取、创建以及如何删除呢?本文将要一一介绍</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>隐藏注册表的原理</li>
+  <li>隐藏注册表的实现</li>
+  <li>程序编写上需要注意的问题</li>
+</ul>
+
+<h2 id="0x02-原理">0x02 原理</h2>
+<hr>
+
+<p>注册表键值名称经过特殊构造： 以”\0”作为开头，后面加上任意字符(不能为数字)</p>
+
+<p>对于Windows系统，”\0”(即0x0000)会被识别为字符串的结束符，所以在对该字符串读取的过程中，遇到开头的”\0”，会被解析成结束符，提前截断，导致读取错误</p>
+
+<p>而使用Native API设定注册表，需要使用结构体<code class="language-plaintext highlighter-rouge">OBJECT_ATTRIBUTES</code>作为参数， 指定读取的字符串长度</p>
+
+<p>只要长度设定正常，就能够读取正确的字符串，避免这个bug</p>
+
+<p>所以，我们可以通过Native API来创建这个特殊的注册表名</p>
+
+<p>更为重要的是，像regedit.exe和其他对注册表的操作，通常会调用Win32 API，这就导致该注册表无法被读取，也就实现了所谓的”隐藏”</p>
+
+<p>综上，创建方法为： <strong>通过Native API创建一个以”\0”开头的键值</strong></p>
+
+<h2 id="0x03-编写程序实现">0x03 编写程序实现</h2>
+<hr>
+
+<p>通过Native API实现对注册表的操作，可供参考的工程地址：</p>
+
+<p>https://www.codeproject.com/Articles/14508/Registry-Manipulation-Using-NT-Native-APIs</p>
+
+<p>作者Dan Madden，他的代码使用了类的封装</p>
+
+<p>个人倾向于使用最基本的api实现，于是参考他的代码，重新设计</p>
+
+<p>对于Native API，需要的结构如下：</p>
+
+<h3 id="1获取native-api的地址">1.获取Native API的地址</h3>
+
+<p>注册表操作的相关Native API可从ntdll.dll中获得</p>
+
+<p>关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HINSTANCE hinstStub = GetModuleHandle(_T("ntdll.dll"));
+NtOpenKey = (LPNTOPENKEY)GetProcAddress(hinstStub, "NtOpenKey");
+</code></pre></div></div>
+
+<h3 id="2native-api的重定义和声明">2.Native API的重定义和声明</h3>
+
+<p>Native API在使用前需要重定义和声明</p>
+
+<p>部分关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>typedef NTSTATUS (STDAPICALLTYPE NTOPENKEY)
+(
+	IN HANDLE				KeyHandle,
+	IN ULONG				DesiredAccess,
+	IN POBJECT_ATTRIBUTES	ObjectAttributes
+);
+typedef NTOPENKEY FAR * LPNTOPENKEY;
+LPNTOPENKEY					NtOpenKey;
+</code></pre></div></div>
+
+<h3 id="3-特殊结构体的使用">3. 特殊结构体的使用</h3>
+
+<p>注册表操作相关Native API会使用到如下结构体，需要定义和声明</p>
+
+<ul>
+  <li>InitializeObjectAttributes</li>
+  <li>_STRING</li>
+  <li>_UNICODE_STRING</li>
+  <li>_OBJECT_ATTRIBUTES</li>
+  <li>_KEY_INFORMATION_CLASS</li>
+  <li>_KEY_BASIC_INFORMATION</li>
+  <li>_KEY_VALUE_PARTIAL_INFORMATION</li>
+  <li>_KEY_VALUE_INFORMATION_CLASS</li>
+  <li>RtlInitAnsiString</li>
+  <li>RtlAnsiStringToUnicodeString</li>
+</ul>
+
+<p>Dan Madden的工程实现了创建隐藏注册表项(注册表项名称以\0开头)，该注册表项下的键值通过正常的Native API实现创建、读取、删除</p>
+
+<p>通过最基本api的实现过程不再赘述，封装好的API源代码可参考文末给出的链接</p>
+
+<p>测试Dan Madden工程包含的功能：</p>
+
+<h4 id="1创建隐藏注册表项">1.创建隐藏注册表项</h4>
+
+<p><code class="language-plaintext highlighter-rouge">MyCreateHiddenKey("\\Registry\\Machine\\Software\\testhidden");</code></p>
+
+<p>使用注册表工具regedit.exe无法打开该键值，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-5/2-1.png" alt="Alt text"></p>
+
+<h4 id="2在该注册表下创建注册表键值">2.在该注册表下创建注册表键值</h4>
+
+<p>先获得该注册表项的句柄：</p>
+
+<p><code class="language-plaintext highlighter-rouge">hKey = MyOpenHiddenKey("\\Registry\\Machine\\Software\\testhidden");</code></p>
+
+<p>创建注册表项下的键值test1并赋值：</p>
+
+<p><code class="language-plaintext highlighter-rouge">MySetValueKey(hKey,"test1","0123456789abcdef",REG_SZ);</code></p>
+
+<p>读取该注册表项下键值test1的内容：</p>
+
+<p><code class="language-plaintext highlighter-rouge">MyQueryValueKeyString(hKey,"test1");</code></p>
+
+<p>删除该注册表项下的键值test1：</p>
+
+<p><code class="language-plaintext highlighter-rouge">MyDeleteValueKey(hKey,"test1");</code></p>
+
+<p>删除注册表项：</p>
+
+<p><code class="language-plaintext highlighter-rouge">MyDeleteKey(hKey);</code></p>
+
+<p>程序输出如下图，成功对隐藏注册表项下的正常键值进行操作</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-5/2-2.png" alt="Alt text"></p>
+
+<p>接下来，对Dan Madden的工程添加新的功能：创建、读取、删除隐藏注册表键值，思路如下：</p>
+
+<p>对于注册表项的隐藏，在注册表项的名称首位填”\0”即可</p>
+
+<p>对应注册表键值的隐藏，原理上也是在键值的名称首位填”\0”，但在参数传递上需要注意更多问题</p>
+
+<h3 id="1不需要修改的功能">1.不需要修改的功能</h3>
+
+<p>创建注册表键、打开注册表键和删除注册表键的功能不需要修改，使用正常的名称即可</p>
+
+<h3 id="2设置注册表键值">2.设置注册表键值</h3>
+
+<p>对应源代码中的MySetHiddenValueKey</p>
+
+<p>传入参数使用char型数组，，用来定义注册表键值名称，内容为”\0abcd”</p>
+
+<p>由于”\0”的存在，所以无法直接使用strlen计算数组长度</p>
+
+<p>变通方法：</p>
+
+<p>计算从偏移2开始的数组长度，最终再加2</p>
+
+<p>即len = strlen(buf+2)+2</p>
+
+<p>Native API NtSetValueKey用来设定键值，定义如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>typedef NTSTATUS (STDAPICALLTYPE NTSETVALUEKEY)
+(
+	IN HANDLE			KeyHandle,
+	IN PUNICODE_STRING	ValueName,
+	IN ULONG			TitleIndex,			/* optional */
+	IN ULONG			Type,
+	IN PVOID			Data,
+	IN ULONG			DataSize
+);
+</code></pre></div></div>
+
+<p>第二个参数指定键值名称，需要使用结构体UNICODE_STRING</p>
+
+<p>正常情况下，我们需要先使用<code class="language-plaintext highlighter-rouge">RtlInitAnsiString</code>将传入的buf数组转换成结构体ANSI_STRING，再使用<code class="language-plaintext highlighter-rouge">RtlAnsiStringToUnicodeString</code>将其转换成结构体UNICODE_STRING，作为参数</p>
+
+<p>由于”\0”的存在，无法使用<code class="language-plaintext highlighter-rouge">RtlAnsiStringToUnicodeString</code></p>
+
+<p>所以，我们需要自己实现结构体ANSI_STRING向结构体UNICODE_STRING的转换</p>
+
+<p>ANSI向UNICODE的转换，在长度计算上，乘以2即可</p>
+
+<p>数组内容上，奇数位赋值，偶数为填0x00</p>
+
+<p>当然，我们需要一个中转数组TempBuff实现数组内容的转换</p>
+
+<p>关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ValueName.Length = asName.Length*2;
+ValueName.MaximumLength = asName.MaximumLength*2;
+char *TempBuff;
+TempBuff = (char*)malloc(ValueName.Length);
+for(int i=0;i&lt;asName.Length;i++)
+{
+	TempBuff[i*2] = asName.Buffer[i];
+	TempBuff[i*2+1] = 0x00;
+}
+ValueName.Buffer = (WCHAR *)TempBuff;
+</code></pre></div></div>
+
+<p>第四个参数，指定键值内容，需要将传入的char数组转换为WCHAR</p>
+
+<p>关键代码：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>WCHAR wszValue[1024];
+unsigned int n ;
+for (n=0; n&lt;strlen(csData); n++) {
+	wszValue[n] = (WCHAR)csData[n];
+}
+wszValue[n++] = L'\0';
+</code></pre></div></div>
+
+<h3 id="3读取注册表键值">3.读取注册表键值</h3>
+
+<p>对应源代码中的MyQueryHiddenValueKeyString</p>
+
+<p>参照2，需要注意”\0”的影响</p>
+
+<h3 id="4删除注册表键值">4、删除注册表键值</h3>
+
+<p>对应源代码中的MyDeleteHiddenValueKey</p>
+
+<p>参照2，需要注意”\0”的影响</p>
+
+<p><strong>实际测试：</strong></p>
+
+<p>创建注册表项test2,创建隐藏注册表键值\0test2,创建正常注册表键值test2</p>
+
+<p>直接打开，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-5/2-3.png" alt="Alt text"></p>
+
+<p>能够正常访问注册表键值test2，但无法访问注册表键值\0test2</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-5/2-4.png" alt="Alt text"></p>
+
+<p>而我们编写的程序能够正常读取，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-5/2-5.png" alt="Alt text"></p>
+
+<p>至此，成功实现对注册表键值的隐藏</p>
+
+<p>以上功能代码已开源，地址如下：</p>
+
+<p>https://github.com/3gstudent/HiddenNtRegistry</p>
+
+<h2 id="0x04-powershell实现">0x04 powershell实现</h2>
+<hr>
+
+<p>可参考Brian Reitz的工程，地址如下：</p>
+
+<p>https://gist.github.com/brianreitz/feb4e14bd45dd2e4394c225b17df5741</p>
+
+<p>具体说明可参考：</p>
+
+<p>https://posts.specterops.io/hiding-registry-keys-with-psreflect-b18ec5ac8353?source=collection_archive———2—————-</p>
+
+<p>实现了在<code class="language-plaintext highlighter-rouge">HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run</code>下创建键值\0abcd，内容为<code class="language-plaintext highlighter-rouge">mshta javascript:alert(1)</code></p>
+
+<p>使用我们编写的程序成功读取该键值，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2017-12-5/4-1.png" alt="Alt text"></p>
+
+<h2 id="0x05-补充">0x05 补充</h2>
+<hr>
+
+<p>PSReflect-Functions包含多个通过powershell调用API的实例代码，地址如下：</p>
+
+<p>https://github.com/jaredcatkinson/PSReflect-Functions</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了Poweliks使用过的注册表隐藏技术，分析原理，编写c程序实现功能，测试powershell实现代码</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on December  5, 2017
+  </div>
+
+  
+</article>

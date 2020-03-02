@@ -1,0 +1,322 @@
+<article class="post">
+  <h1>渗透基础——活动目录信息的获取</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在域渗透中，活动目录信息的获取必不可少</p>
+
+<p>本文将要以获取活动目录中所有用户、所有计算机和所有组为例，介绍常用的信息获取方法</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>域外获取活动目录信息的方法</li>
+  <li>域内获取活动目录信息的方法</li>
+  <li>使用C++调用ADSI接口获取信息的方法</li>
+</ul>
+
+<h2 id="0x02-基础知识">0x02 基础知识</h2>
+<hr>
+
+<p>域环境使用directory database（目录数据库）来存储用户、计算机账户和组等对象</p>
+
+<p>使用LDAP(Lightweight Directory Access Protocol)（轻量目录访问协议）来查询和更新目录数据库</p>
+
+<p>常用缩写词</p>
+
+<ul>
+  <li>DN:Distinguished Name</li>
+  <li>CN:Common Name</li>
+  <li>OU:Organizational Unit</li>
+  <li>DC:Domain Controller</li>
+</ul>
+
+<p>其中DN有三个属性，分别是CN、OU和DC</p>
+
+<p>简单理解：</p>
+
+<p>域控制器默认会开启端口389，用作LDAP服务</p>
+
+<h2 id="0x03-域外获取活动目录信息的方法">0x03 域外获取活动目录信息的方法</h2>
+<hr>
+
+<h3 id="1kali系统通过ldapsearch进行数据查询">1.Kali系统通过ldapsearch进行数据查询</h3>
+
+<p>测试环境如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/2-1.png" alt="Alt text"></p>
+
+<p>前提：我们能够访问到域控制器(DC)的389端口，并且我们至少已经获得了域内一个普通用户的口令</p>
+
+<p>这个测试环境中，我们获得了域内普通用户<code class="language-plaintext highlighter-rouge">testa</code>的口令为<code class="language-plaintext highlighter-rouge">DomainUser123!</code></p>
+
+<p>连接命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ldapsearch -x -H ldap://192.168.1.1:389 -D "CN=testa,CN=Users,DC=test,DC=com" -w DomainUser123! -b "DC=test,DC=com"
+</code></pre></div></div>
+
+<p>参数说明：</p>
+
+<ul>
+  <li>-x   进行简单认证</li>
+  <li>-H   服务器地址</li>
+  <li>-D   用来绑定服务器的DN</li>
+  <li>-w   绑定DN的密码</li>
+  <li>-b   指定要查询的根节点</li>
+</ul>
+
+<p>这条命令会显示所能查询到的所有信息，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/2-2.png" alt="Alt text"></p>
+
+<p>接下来加入搜索条件，对结果进行分类</p>
+
+<h4 id="1查询所有域用户">(1)查询所有域用户</h4>
+
+<p>加入搜索条件：<code class="language-plaintext highlighter-rouge">"(&amp;(objectClass=user)(objectCategory=person))"</code></p>
+
+<p>完整命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ldapsearch -x -H ldap://192.168.1.1:389 -D "CN=testa,CN=Users,DC=test,DC=com" -w DomainUser123! -b "DC=test,DC=com" -b "DC=test,DC=com" "(&amp;(objectClass=user)(objectCategory=person))"
+</code></pre></div></div>
+
+<p>这条命令会输出所有域用户的所有属性，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/2-3.png" alt="Alt text"></p>
+
+<p>为了便于统计名称，可以选择只列出CN(Common Name)，并且使用<code class="language-plaintext highlighter-rouge">grep</code>命令对输出进行过滤</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ldapsearch -x -H ldap://192.168.1.1:389 -D "CN=testa,CN=Users,DC=test,DC=com" -w DomainUser123! -b "DC=test,DC=com" -b "DC=test,DC=com" "(&amp;(objectClass=user)(objectCategory=person))" CN | grep cn
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/2-4.png" alt="Alt text"></p>
+
+<h4 id="2查询所有计算机">(2)查询所有计算机</h4>
+
+<p>加入搜索条件：<code class="language-plaintext highlighter-rouge">"(&amp;(objectCategory=computer)(objectClass=computer))"</code></p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ldapsearch -x -H ldap://192.168.1.1:389 -D "CN=testa,CN=Users,DC=test,DC=com" -w DomainUser123! -b "DC=test,DC=com" -b "DC=test,DC=com" "(&amp;(objectCategory=computer)(objectClass=computer))" CN | grep cn
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/2-5.png" alt="Alt text"></p>
+
+<h4 id="3查询所有组">(3)查询所有组</h4>
+
+<p>加入搜索条件：<code class="language-plaintext highlighter-rouge">"(&amp;(objectCategory=group))"</code></p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ldapsearch -x -H ldap://192.168.1.1:389 -D "CN=testa,CN=Users,DC=test,DC=com" -w DomainUser123! -b "DC=test,DC=com" -b "DC=test,DC=com" "(&amp;(objectCategory=group))" CN | grep cn
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/2-6.png" alt="Alt text"></p>
+
+<h3 id="2windows系统通过powerview进行数据查询">2.Windows系统通过PowerView进行数据查询</h3>
+
+<p>测试环境如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/3-1.png" alt="Alt text"></p>
+
+<p>前提：我们能够访问到域控制器(DC)的389端口，并且我们至少已经获得了域内一个普通用户的口令</p>
+
+<p>这个测试环境中，我们获得了域内普通用户<code class="language-plaintext highlighter-rouge">testa</code>的口令为<code class="language-plaintext highlighter-rouge">DomainUser123!</code></p>
+
+<p>PowerView的地址：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1</p>
+
+<h4 id="1查询所有域用户-1">(1)查询所有域用户</h4>
+
+<p>这里需要使用凭据信息，所以完整的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$uname="testa"                                                      
+$pwd=ConvertTo-SecureString "DomainUser123!" -AsPlainText –Force                   
+$cred=New-Object System.Management.Automation.PSCredential($uname,$pwd)        
+Get-NetUser -Domain test.com -DomainController 192.168.1.1 -ADSpath "LDAP://DC=test,DC=com" -Credential $cred  
+</code></pre></div></div>
+
+<p>为了便于统计名称，可以选择只列出name项，完整命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$uname="testa"                                                      
+$pwd=ConvertTo-SecureString "DomainUser123!" -AsPlainText –Force                   
+$cred=New-Object System.Management.Automation.PSCredential($uname,$pwd)        
+Get-NetUser -Domain test.com -DomainController 192.168.1.1 -ADSpath "LDAP://DC=test,DC=com" -Credential $cred | fl name
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/3-2.png" alt="Alt text"></p>
+
+<h4 id="2查询所有计算机-1">(2)查询所有计算机</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$uname="testa"                                                      
+$pwd=ConvertTo-SecureString "DomainUser123!" -AsPlainText –Force                   
+$cred=New-Object System.Management.Automation.PSCredential($uname,$pwd)        
+Get-NetComputer -Domain test.com -DomainController 192.168.1.1 -ADSpath "LDAP://DC=test,DC=com" -Credential $cred | fl name
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/3-3.png" alt="Alt text"></p>
+
+<h4 id="3查询所有组-1">(3)查询所有组</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$uname="testa"                                                      
+$pwd=ConvertTo-SecureString "DomainUser123!" -AsPlainText –Force                   
+$cred=New-Object System.Management.Automation.PSCredential($uname,$pwd)        
+Get-NetGroup -Domain test.com -DomainController 192.168.1.1 -ADSpath "LDAP://DC=test,DC=com" -Credential $cred | fl name
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/3-4.png" alt="Alt text"></p>
+
+<h2 id="0x04-域内获取活动目录信息的方法">0x04 域内获取活动目录信息的方法</h2>
+<hr>
+
+<p>前提是已经获得了域内一台主机的权限</p>
+
+<p>测试环境如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/4-1.png" alt="Alt text"></p>
+
+<p>原理：通过ADSI(ActiveDirectoryServicesInterface)（活动目录服务接口）进行LDAP查询，获得结果</p>
+
+<h3 id="1使用powershell实现">1.使用Powershell实现</h3>
+
+<p>参照PowerView，地址：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1</p>
+
+<h3 id="2使用c实现">2.使用C#实现</h3>
+
+<p>参照SharpView，地址：</p>
+
+<p>https://github.com/tevora-threat/SharpView</p>
+
+<h3 id="3使用c实现">3.使用C++实现</h3>
+
+<p>参考地址：</p>
+
+<p>https://github.com/microsoft/Windows-classic-samples/tree/master/Samples/Win7Samples/netds/adsi/activedir/QueryUsers/vc</p>
+
+<p>https://github.com/outflanknl/Recon-AD</p>
+
+<p>微软的代码是exe的格式，只介绍了QueryUser的方法，但支持查询条件（筛选指定用户）和显示简要信息（只输出名称，便于统计）</p>
+
+<p>Recon-AD的代码是dll的格式，包含多个功能，但默认只显示详细信息</p>
+
+<p>于是我将两者的代码融合，代码支持以下功能：</p>
+
+<ul>
+  <li>exe的格式</li>
+  <li>包含多个功能，支持查询用户、计算机和组等</li>
+  <li>支持查询条件和显示简要信息</li>
+</ul>
+
+<p>代码已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/QueryADObject.cpp</p>
+
+<p>代码可指定ADS path和搜索条件，用法如下：</p>
+
+<h4 id="1查询域用户">(1)查询域用户</h4>
+
+<p>列出所有域用户，只显示简要的名称信息，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>QueryADObject.exe Current "(&amp;(objectClass=user)(objectCategory=person))" ShortData
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/5-1.png" alt="Alt text"></p>
+
+<p>查询指定用户的所有信息，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>QueryADObject.exe Current "(&amp;(objectClass=user)(objectCategory=person)(name=testa))" AllData
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/5-2.png" alt="Alt text"></p>
+
+<h4 id="2查询计算机">(2)查询计算机</h4>
+
+<p>列出所有计算机账户，只显示简要的名称信息，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>QueryADObject.exe Current "(&amp;(objectCategory=computer)(objectClass=computer))" ShortData
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/5-3.png" alt="Alt text"></p>
+
+<p>查询域控制器的详细信息，需要知道ADS path为<code class="language-plaintext highlighter-rouge">"OU=Domain Controllers,DC=test,DC=com"</code>，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>QueryADObject.exe "OU=Domain Controllers,DC=test,DC=com" "(&amp;(objectCategory=computer)(objectClass=computer))" AllData
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/5-4.png" alt="Alt text"></p>
+
+<h4 id="3查询组">(3)查询组</h4>
+
+<p>列出所有组，只显示简要的名称信息，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>QueryADObject.exe Current "(&amp;(objectCategory=group))" ShortData
+</code></pre></div></div>
+
+<p>列出管理员组的详细信息，命令如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>QueryADObject.exe Current "(&amp;(objectCategory=group)(name=Domain Admins))" Alldata
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/5-5.png" alt="Alt text"></p>
+
+<h4 id="4查询ou">(4)查询OU</h4>
+
+<p>列出所有OU，只显示简要的名称信息，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>QueryADObject.exe Current "(&amp;(objectCategory=organizationalUnit))" ShortData
+</code></pre></div></div>
+
+<p>结果输出如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-12-12/5-6.png" alt="Alt text"></p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文以获取活动目录中所有用户、所有计算机和所有组为例，分别介绍了从域外和域内获取信息的方法。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on December 12, 2019
+  </div>
+
+  
+</article>

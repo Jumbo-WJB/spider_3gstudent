@@ -1,0 +1,522 @@
+<article class="post">
+  <h1>渗透基础——Windows下计划任务的使用</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在渗透测试中，尤其是域渗透，常常会用到Windows系统的计划任务，一是用于远程启动程序，二是用于程序的自启动</p>
+
+<p>那么，计划任务具体有哪些使用技巧呢？是否对权限有要求？一定需要管理员权限才能运行吗？</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>命令行实现</li>
+  <li>c++实现</li>
+  <li>不同权限下创建计划任务的区别</li>
+  <li>COM组件ITaskService能否提权运行</li>
+  <li>命令行开启和关闭计划任务</li>
+  <li>日志位置</li>
+</ul>
+
+<h2 id="0x02-简介">0x02 简介</h2>
+<hr>
+
+<p>官方说明文档：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/windows/desktop/aa446802(v=vs.85).aspx</p>
+
+<p>需要开启服务<code class="language-plaintext highlighter-rouge">Task Scheduler</code></p>
+
+<p>可在以下情况触发：</p>
+
+<ul>
+  <li>When a specific system event occurs.</li>
+  <li>At a specific time.</li>
+  <li>At a specific time on a daily schedule.</li>
+  <li>At a specific time on a weekly schedule.</li>
+  <li>At a specific time on a monthly schedule.</li>
+  <li>At a specific time on a monthly day-of-week schedule.</li>
+  <li>When the computer enters an idle state.</li>
+  <li>When the task is registered.</li>
+  <li>When the system is booted.</li>
+  <li>When a user logs on.</li>
+  <li>When a Terminal Server session changes state.</li>
+</ul>
+
+<p>计划任务创建后，会在<code class="language-plaintext highlighter-rouge">C:\Windows\System32\Tasks</code>保存XML格式的配置文件</p>
+
+<h2 id="0x03-计划任务的配置方式">0x03 计划任务的配置方式</h2>
+<hr>
+
+<h3 id="1界面操作">1、界面操作</h3>
+
+<p>执行taskschd.msc，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/2-1.png" alt="Alt text"></p>
+
+<p>选中<code class="language-plaintext highlighter-rouge">Task Scheduler Library</code> ，右键 -&gt; <code class="language-plaintext highlighter-rouge">Create Task...</code></p>
+
+<p>弹出界面，逐个配置即可，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/2-2.png" alt="Alt text"></p>
+
+<h3 id="2命令行配置">2、命令行配置</h3>
+
+<h4 id="1-at-命令">(1) at 命令</h4>
+
+<p>(管理员权限)</p>
+
+<p>eg：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>at 23:53 notepad.exe
+</code></pre></div></div>
+
+<p>默认以system权限启动，适用于Win7</p>
+
+<p>从Win8开始不再支持at命令，所以不过多介绍</p>
+
+<h4 id="2-schtasks命令">(2) schtasks命令</h4>
+
+<p>支持Win7-Win10</p>
+
+<p><strong>1.每天固定时间，以普通权限启动notepad.exe</strong></p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>schtasks /Create /TN TestService1 /SC DAILY /ST 01:02 /TR notepad.exe
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Windows\System32\Tasks</code>产生新文件TestService1，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0" encoding="UTF-16"?&gt;
+&lt;Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"&gt;
+  &lt;RegistrationInfo&gt;
+    &lt;Date&gt;2018-05-23T17:21:00&lt;/Date&gt;
+    &lt;Author&gt;a&lt;/Author&gt;
+  &lt;/RegistrationInfo&gt;
+  &lt;Triggers&gt;
+    &lt;CalendarTrigger&gt;
+      &lt;StartBoundary&gt;2018-05-23T01:02:00&lt;/StartBoundary&gt;
+      &lt;Enabled&gt;true&lt;/Enabled&gt;
+      &lt;ScheduleByDay&gt;
+        &lt;DaysInterval&gt;1&lt;/DaysInterval&gt;
+      &lt;/ScheduleByDay&gt;
+    &lt;/CalendarTrigger&gt;
+  &lt;/Triggers&gt;
+  &lt;Settings&gt;
+    &lt;MultipleInstancesPolicy&gt;IgnoreNew&lt;/MultipleInstancesPolicy&gt;
+    &lt;DisallowStartIfOnBatteries&gt;true&lt;/DisallowStartIfOnBatteries&gt;
+    &lt;StopIfGoingOnBatteries&gt;true&lt;/StopIfGoingOnBatteries&gt;
+    &lt;AllowHardTerminate&gt;true&lt;/AllowHardTerminate&gt;
+    &lt;StartWhenAvailable&gt;false&lt;/StartWhenAvailable&gt;
+    &lt;RunOnlyIfNetworkAvailable&gt;false&lt;/RunOnlyIfNetworkAvailable&gt;
+    &lt;IdleSettings&gt;
+      &lt;Duration&gt;PT10M&lt;/Duration&gt;
+      &lt;WaitTimeout&gt;PT1H&lt;/WaitTimeout&gt;
+      &lt;StopOnIdleEnd&gt;true&lt;/StopOnIdleEnd&gt;
+      &lt;RestartOnIdle&gt;false&lt;/RestartOnIdle&gt;
+    &lt;/IdleSettings&gt;
+    &lt;AllowStartOnDemand&gt;true&lt;/AllowStartOnDemand&gt;
+    &lt;Enabled&gt;true&lt;/Enabled&gt;
+    &lt;Hidden&gt;false&lt;/Hidden&gt;
+    &lt;RunOnlyIfIdle&gt;false&lt;/RunOnlyIfIdle&gt;
+    &lt;WakeToRun&gt;false&lt;/WakeToRun&gt;
+    &lt;ExecutionTimeLimit&gt;PT72H&lt;/ExecutionTimeLimit&gt;
+    &lt;Priority&gt;7&lt;/Priority&gt;
+  &lt;/Settings&gt;
+  &lt;Actions Context="Author"&gt;
+    &lt;Exec&gt;
+      &lt;Command&gt;notepad.exe&lt;/Command&gt;
+    &lt;/Exec&gt;
+  &lt;/Actions&gt;
+  &lt;Principals&gt;
+    &lt;Principal id="Author"&gt;
+      &lt;UserId&gt;WIN-R7MM90ERBMD\a&lt;/UserId&gt;
+      &lt;LogonType&gt;InteractiveToken&lt;/LogonType&gt;
+      &lt;RunLevel&gt;LeastPrivilege&lt;/RunLevel&gt;
+    &lt;/Principal&gt;
+  &lt;/Principals&gt;
+&lt;/Task&gt;
+</code></pre></div></div>
+
+<p>值得注意的是<code class="language-plaintext highlighter-rouge">&lt;RunLevel&gt;LeastPrivilege&lt;/RunLevel&gt;</code>，代表权限为普通用户</p>
+
+<p><strong>2.每天固定时间，以system权限启动notepad.exe</strong></p>
+
+<p>命令如下(管理员权限)：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>schtasks /Create /TN TestService2 /SC DAILY /ST 01:02 /TR notepad.exe /RL HIGHEST
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Windows\System32\Tasks</code>产生新文件TestService2，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0" encoding="UTF-16"?&gt;
+&lt;Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"&gt;
+  &lt;RegistrationInfo&gt;
+    &lt;Date&gt;2018-05-23T17:23:23&lt;/Date&gt;
+    &lt;Author&gt;a&lt;/Author&gt;
+  &lt;/RegistrationInfo&gt;
+  &lt;Triggers&gt;
+    &lt;CalendarTrigger&gt;
+      &lt;StartBoundary&gt;2018-05-23T01:02:00&lt;/StartBoundary&gt;
+      &lt;Enabled&gt;true&lt;/Enabled&gt;
+      &lt;ScheduleByDay&gt;
+        &lt;DaysInterval&gt;1&lt;/DaysInterval&gt;
+      &lt;/ScheduleByDay&gt;
+    &lt;/CalendarTrigger&gt;
+  &lt;/Triggers&gt;
+  &lt;Principals&gt;
+    &lt;Principal id="Author"&gt;
+      &lt;RunLevel&gt;HighestAvailable&lt;/RunLevel&gt;
+      &lt;UserId&gt;WIN-R7MM90ERBMD\a&lt;/UserId&gt;
+      &lt;LogonType&gt;InteractiveToken&lt;/LogonType&gt;
+    &lt;/Principal&gt;
+  &lt;/Principals&gt;
+  &lt;Settings&gt;
+    &lt;MultipleInstancesPolicy&gt;IgnoreNew&lt;/MultipleInstancesPolicy&gt;
+    &lt;DisallowStartIfOnBatteries&gt;true&lt;/DisallowStartIfOnBatteries&gt;
+    &lt;StopIfGoingOnBatteries&gt;true&lt;/StopIfGoingOnBatteries&gt;
+    &lt;AllowHardTerminate&gt;true&lt;/AllowHardTerminate&gt;
+    &lt;StartWhenAvailable&gt;false&lt;/StartWhenAvailable&gt;
+    &lt;RunOnlyIfNetworkAvailable&gt;false&lt;/RunOnlyIfNetworkAvailable&gt;
+    &lt;IdleSettings&gt;
+      &lt;Duration&gt;PT10M&lt;/Duration&gt;
+      &lt;WaitTimeout&gt;PT1H&lt;/WaitTimeout&gt;
+      &lt;StopOnIdleEnd&gt;true&lt;/StopOnIdleEnd&gt;
+      &lt;RestartOnIdle&gt;false&lt;/RestartOnIdle&gt;
+    &lt;/IdleSettings&gt;
+    &lt;AllowStartOnDemand&gt;true&lt;/AllowStartOnDemand&gt;
+    &lt;Enabled&gt;true&lt;/Enabled&gt;
+    &lt;Hidden&gt;false&lt;/Hidden&gt;
+    &lt;RunOnlyIfIdle&gt;false&lt;/RunOnlyIfIdle&gt;
+    &lt;WakeToRun&gt;false&lt;/WakeToRun&gt;
+    &lt;ExecutionTimeLimit&gt;PT72H&lt;/ExecutionTimeLimit&gt;
+    &lt;Priority&gt;7&lt;/Priority&gt;
+  &lt;/Settings&gt;
+  &lt;Actions Context="Author"&gt;
+    &lt;Exec&gt;
+      &lt;Command&gt;notepad.exe&lt;/Command&gt;
+    &lt;/Exec&gt;
+  &lt;/Actions&gt;
+&lt;/Task&gt;
+</code></pre></div></div>
+
+<p>值得注意的是<code class="language-plaintext highlighter-rouge">&lt;RunLevel&gt;HighestAvailable&lt;/RunLevel&gt;</code>，代表权限为最高，一般为System权限</p>
+
+<p><strong>3.每天固定时间，以system权限启动notepad.exe，通过导入xml文件的方式</strong></p>
+
+<p>以文件TestService2作为模板，修改启动时间，保存为1.xml，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;?xml version="1.0" encoding="UTF-16"?&gt;
+&lt;Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"&gt;
+  &lt;RegistrationInfo&gt;
+    &lt;Date&gt;2018-05-23T17:23:23&lt;/Date&gt;
+    &lt;Author&gt;a&lt;/Author&gt;
+  &lt;/RegistrationInfo&gt;
+  &lt;Triggers&gt;
+    &lt;CalendarTrigger&gt;
+      &lt;StartBoundary&gt;2018-05-23T01:03:00&lt;/StartBoundary&gt;
+      &lt;Enabled&gt;true&lt;/Enabled&gt;
+      &lt;ScheduleByDay&gt;
+        &lt;DaysInterval&gt;1&lt;/DaysInterval&gt;
+      &lt;/ScheduleByDay&gt;
+    &lt;/CalendarTrigger&gt;
+  &lt;/Triggers&gt;
+  &lt;Principals&gt;
+    &lt;Principal id="Author"&gt;
+      &lt;RunLevel&gt;HighestAvailable&lt;/RunLevel&gt;
+      &lt;UserId&gt;WIN-R7MM90ERBMD\a&lt;/UserId&gt;
+      &lt;LogonType&gt;InteractiveToken&lt;/LogonType&gt;
+    &lt;/Principal&gt;
+  &lt;/Principals&gt;
+  &lt;Settings&gt;
+    &lt;MultipleInstancesPolicy&gt;IgnoreNew&lt;/MultipleInstancesPolicy&gt;
+    &lt;DisallowStartIfOnBatteries&gt;true&lt;/DisallowStartIfOnBatteries&gt;
+    &lt;StopIfGoingOnBatteries&gt;true&lt;/StopIfGoingOnBatteries&gt;
+    &lt;AllowHardTerminate&gt;true&lt;/AllowHardTerminate&gt;
+    &lt;StartWhenAvailable&gt;false&lt;/StartWhenAvailable&gt;
+    &lt;RunOnlyIfNetworkAvailable&gt;false&lt;/RunOnlyIfNetworkAvailable&gt;
+    &lt;IdleSettings&gt;
+      &lt;Duration&gt;PT10M&lt;/Duration&gt;
+      &lt;WaitTimeout&gt;PT1H&lt;/WaitTimeout&gt;
+      &lt;StopOnIdleEnd&gt;true&lt;/StopOnIdleEnd&gt;
+      &lt;RestartOnIdle&gt;false&lt;/RestartOnIdle&gt;
+    &lt;/IdleSettings&gt;
+    &lt;AllowStartOnDemand&gt;true&lt;/AllowStartOnDemand&gt;
+    &lt;Enabled&gt;true&lt;/Enabled&gt;
+    &lt;Hidden&gt;false&lt;/Hidden&gt;
+    &lt;RunOnlyIfIdle&gt;false&lt;/RunOnlyIfIdle&gt;
+    &lt;WakeToRun&gt;false&lt;/WakeToRun&gt;
+    &lt;ExecutionTimeLimit&gt;PT72H&lt;/ExecutionTimeLimit&gt;
+    &lt;Priority&gt;7&lt;/Priority&gt;
+  &lt;/Settings&gt;
+  &lt;Actions Context="Author"&gt;
+    &lt;Exec&gt;
+      &lt;Command&gt;notepad.exe&lt;/Command&gt;
+    &lt;/Exec&gt;
+  &lt;/Actions&gt;
+&lt;/Task&gt;
+</code></pre></div></div>
+
+<p>通过xml文件导入配置，建立计划任务，以system权限启动，命令如下(管理员权限)：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>schtasks /create /xml c:\test\1.xml /tn TestService3
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>如果是一个新的系统，修改<code class="language-plaintext highlighter-rouge">&lt;Author&gt;</code>、<code class="language-plaintext highlighter-rouge">&lt;Date&gt;</code>、<code class="language-plaintext highlighter-rouge">&lt;StartBoundary&gt;</code>、<code class="language-plaintext highlighter-rouge">&lt;UserId&gt;</code>和<code class="language-plaintext highlighter-rouge">&lt;Command&gt;</code>即可</p>
+
+<p><strong>4.每天固定时间，以普通权限启动notepad.exe，通过导入xml文件的方式</strong></p>
+
+<p>修改1.xml：</p>
+
+<p><code class="language-plaintext highlighter-rouge">&lt;RunLevel&gt;HighestAvailable&lt;/RunLevel&gt;</code>改为<code class="language-plaintext highlighter-rouge">&lt;RunLevel&gt;LeastPrivilege&lt;/RunLevel&gt;</code>即可</p>
+
+<p>导入配置的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>schtasks /create /xml c:\test\1.xml /tn TestService4
+</code></pre></div></div>
+
+<p><strong>补充：schtasks的其他命令用法</strong></p>
+
+<p>查看服务状态：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>schtasks /Query /TN TestService1
+</code></pre></div></div>
+
+<p>删除服务：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>schtasks /Delete /TN TestService1 /F
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>服务执行成功后不会自动删除</p>
+
+<h2 id="0x04-编写程序实现">0x04 编写程序实现</h2>
+<hr>
+
+<p>官方文档：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/windows/desktop/aa383614(v=vs.85).aspx</p>
+
+<p>c++定时启动程序的实现实例：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/windows/desktop/aa383624(v=vs.85).aspx</p>
+
+<p>程序实现了在特定时间启动notepad.exe</p>
+
+<p>通过分析源码，发现是调用了COM组件<code class="language-plaintext highlighter-rouge">ITaskService</code></p>
+
+<p>于是产生了一个新问题，<strong>能否通过COM组件ITaskService越权执行？</strong></p>
+
+<p>答案是不能，原因如下：</p>
+
+<p>首先，在c代码中能够找到<code class="language-plaintext highlighter-rouge">CLSID_TaskScheduler</code>对应的GUID，位于taskschd.h文件中</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/3-1.png" alt="Alt text"></p>
+
+<p>GUID为<code class="language-plaintext highlighter-rouge">"0f87369f-a4e5-4cfc-bd3e-73e6154572dd"</code></p>
+
+<p>查看注册表信息，路径为<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{0f87369f-a4e5-4cfc-bd3e-73e6154572dd}</code></p>
+
+<p>信息如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/3-2.png" alt="Alt text"></p>
+
+<p>未发现注册表项<code class="language-plaintext highlighter-rouge">Elevation</code>，也就是说这个COM组件ITaskService不支持使用COM Elevation Moniker提升权限</p>
+
+<p>那么，能否通过添加注册表项<code class="language-plaintext highlighter-rouge">Elevation</code>实现COM组件提升权限呢？</p>
+
+<p>答案也是不可以，测试如下：</p>
+
+<p>修改注册表<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{0f87369f-a4e5-4cfc-bd3e-73e6154572dd}</code>，需要TrustedInstaller权限</p>
+
+<p>关于如何获得TrustedInstaller权限可参考文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E6%8A%80%E5%B7%A7-Token%E7%AA%83%E5%8F%96%E4%B8%8E%E5%88%A9%E7%94%A8/">《渗透技巧——Token窃取与利用》</a></p>
+
+<p>接下来添加注册表项<code class="language-plaintext highlighter-rouge">Elevation</code>，值为1</p>
+
+<h3 id="测试1">测试1：</h3>
+
+<p>添加<code class="language-plaintext highlighter-rouge">LocalizedString</code>，值为<code class="language-plaintext highlighter-rouge">C:\Windows\system32\taskschd.dll</code></p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/3-3.png" alt="Alt text"></p>
+
+<p>修改官方的实例代码，添加使用COM Elevation Moniker提升权限的代码，关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  HWND    hwnd = GetConsoleWindow();
+  BIND_OPTS3  bo;
+  WCHAR   wszCLSID[50];
+  WCHAR   wszMonikerName[300];
+  StringFromGUID2( CLSID_TaskScheduler,wszCLSID,sizeof(wszCLSID)/sizeof(wszCLSID[0])); 
+  hr = StringCchPrintf(wszMonikerName,sizeof(wszMonikerName)/sizeof(wszMonikerName[0]),L"Elevation:Administrator!new:%s", wszCLSID);
+  memset(&amp;bo, 0, sizeof(bo));
+  bo.cbStruct     = sizeof(bo);
+  bo.hwnd       = hwnd;
+  bo.dwClassContext = CLSCTX_LOCAL_SERVER;
+  hr =  CoGetObject(wszMonikerName, &amp;bo, IID_PPV_ARGS(&amp;pService));
+</code></pre></div></div>
+
+<p>程序报错，而且没有弹出需要提升权限的UAC对话框，对其跟踪调试，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/3-4.png" alt="Alt text"></p>
+
+<p>提示<code class="language-plaintext highlighter-rouge">(ERROR_INVALID_DATA) : 数据无效</code></p>
+
+<p>通过IDA静态分析taskschd.dll，查看<code class="language-plaintext highlighter-rouge">Function</code></p>
+
+<p>没有发现提升权限的函数(关键词Elevated、Admin)</p>
+
+<h3 id="测试2">测试2：</h3>
+
+<p>接下来尝试将<code class="language-plaintext highlighter-rouge">LocalizedString</code>修改为其他可用的路径</p>
+
+<p><code class="language-plaintext highlighter-rouge">LocalizedString</code>设置为<code class="language-plaintext highlighter-rouge">@%SystemRoot%\system32\shell32.dll,-50176</code>(COM组件IFileOperation的值)</p>
+
+<p>执行过程弹出需要提升权限的UAC对话框，接下来报错，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/3-5.png" alt="Alt text"></p>
+
+<p>提示<code class="language-plaintext highlighter-rouge">REGDB_E_CLASSNOTREG Class not registered</code></p>
+
+<p>表示这个组件不支持<code class="language-plaintext highlighter-rouge">ITaskService::Connect</code></p>
+
+<p>和预期的一样，shell32.dll不包含函数<code class="language-plaintext highlighter-rouge">ITaskService::Connect</code></p>
+
+<p>综上，不能简单的通过修改注册表就能使一个普通的COM组件支持权限提升</p>
+
+<p>接下来介绍一下C++代码在实现上的细节</p>
+
+<h4 id="1添加计划任务定时以普通权限执行程序">1、添加计划任务，定时以普通权限执行程序</h4>
+
+<p>直接参考示例代码即可，地址如下：</p>
+
+<p>https://msdn.microsoft.com/en-us/library/windows/desktop/aa383624(v=vs.85).aspx</p>
+
+<p>修改源代码的启动时间，去掉结束时间</p>
+
+<h4 id="2添加计划任务定时以system权限执行程序">2、添加计划任务，定时以system权限执行程序</h4>
+
+<p>需要管理员权限</p>
+
+<p>上面的代码直接以管理员权限运行是不可以的，这是因为并没有指定以最高权限启动</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/4-1.png" alt="Alt text"></p>
+
+<p>需要修改源代码，添加指定以HIGHEST权限启动</p>
+
+<p>关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    //  ------------------------------------------------------
+    //  Create the principal for the task - these credentials
+    //  are overwritten with the credentials passed to RegisterTaskDefinition
+    IPrincipal *pPrincipal = NULL;
+    hr = pTask-&gt;get_Principal( &amp;pPrincipal );
+    if( FAILED(hr) )
+    {
+        printf("\nCannot get principal pointer: %x", hr );
+        pRootFolder-&gt;Release();
+        pTask-&gt;Release();
+        CoUninitialize();
+        return 1;
+    }
+    
+    //  Set up principal logon type to interactive logon
+    hr = pPrincipal-&gt;put_LogonType( TASK_LOGON_INTERACTIVE_TOKEN );
+//    pPrincipal-&gt;Release();
+    if( FAILED(hr) )
+    {
+        printf("\nCannot put principal info: %x", hr );
+        pRootFolder-&gt;Release();
+        pTask-&gt;Release();
+        CoUninitialize();
+        return 1;
+    } 
+
+  //
+  hr = pPrincipal-&gt;put_RunLevel( TASK_RUNLEVEL_HIGHEST );
+  pPrincipal-&gt;Release();
+    if( FAILED(hr) )
+    {
+        printf("\nCannot put principal info: %x", hr );
+        pRootFolder-&gt;Release();
+        pTask-&gt;Release();
+        CoUninitialize();
+        return 1;
+  }
+
+</code></pre></div></div>
+
+<p>当然，以普通权限启动会提示权限不够，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-5-24/4-2.png" alt="Alt text"></p>
+
+<h2 id="0x05-taskscheduler日志">0x05 TaskScheduler日志</h2>
+<hr>
+
+<p>日志类别： <code class="language-plaintext highlighter-rouge">Microsoft-Windows-TaskScheduler</code></p>
+
+<p>保存位置： <code class="language-plaintext highlighter-rouge">C:\Windows\System32\winevt\Logs</code></p>
+
+<p>TaskScheduler日志功能默认关闭</p>
+
+<p>开启方法：</p>
+
+<p>注册表位置：<code class="language-plaintext highlighter-rouge">HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-TaskScheduler/Operational</code></p>
+
+<p>键Enabled设为1(默认为0)</p>
+
+<p>cmd命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REG ADD "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-TaskScheduler/Operational" /v Enabled /t REG_DWORD /d 1 /f
+</code></pre></div></div>
+
+<p>统计日志列表，查询所有日志信息，包含时间，数目：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil gli Microsoft-Windows-TaskScheduler/Operational
+</code></pre></div></div>
+
+<p>查看日志内容：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil qe Microsoft-Windows-TaskScheduler/Operational
+</code></pre></div></div>
+
+<p>删除该类日志所有内容：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wevtutil cl Microsoft-Windows-TaskScheduler/Operational
+</code></pre></div></div>
+
+<p>删除单条日志：</p>
+
+<p>该部分放在之后的文章进行详细介绍</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了计划任务的常用内容，包括多种创建计划任务的方法，不同权限创建计划任务的区别，经测试得出了一个结论，COM组件ITaskService无法提权运行</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on May 24, 2018
+  </div>
+
+  
+</article>

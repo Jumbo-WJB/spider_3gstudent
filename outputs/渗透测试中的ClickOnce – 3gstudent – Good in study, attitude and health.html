@@ -1,0 +1,427 @@
+<article class="post">
+  <h1>渗透测试中的ClickOnce</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>最近Casey Smith@subTee在《Mimikatz Delivery via ClickOnce with URL Parameters》中介绍了如何在ClickOnce程序中传入URL参数，实现执行mimikatz的技巧，并分享了一个POC</p>
+
+<p>我对此很感兴趣，于是做了进一步的学习和研究</p>
+
+<p>本文将会记录学习心得，介绍ClickOnce的使用方法，总结基于ClickOnce的攻击技巧和防御措施</p>
+
+<p><strong>博客地址：</strong></p>
+
+<p>http://subt0x10.blogspot.com/2016/12/mimikatz-delivery-via-clickonce-with.html</p>
+
+<p><strong>POC地址：</strong></p>
+
+<p>https://gist.github.com/subTee/bd446efeacf656c67f5c17ca0787f15b</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p><strong>ClickOnce：</strong></p>
+
+<p>ClickOnce 是一种部署技术，使用该技术可创建自行更新的基于Windows的应用程序，这些应用程序可以通过最低程度的用户交互来安装和运行</p>
+
+<p>使用用ClickOnce主要解决了程序部署中的几个问题：</p>
+
+<ul>
+  <li>
+    <p>更新应用程序的困难
+使用 Microsoft Windows Installer 部署，每次应用程序更新时，用户都必须重新安装整个应用程序；使用 ClickOnce 部署，则可以自动提供更新。只有更改过的应用程序部分才会被下载，然后会从新的并行文件夹重新安装完整的、更新后的应用程序。</p>
+  </li>
+  <li>
+    <p>对用户的计算机的影响
+使用 Windows Installer 部署时，应用程序通常依赖于共享组件，这便有可能发生版本冲突；而使用 ClickOnce 部署时，每个应用程序都是独立的，不会干扰其他应用程序。</p>
+  </li>
+  <li>
+    <p>安全权限
+Windows Installer 部署要求管理员权限并且只允许受限制的用户安装；而 ClickOnce 部署允许非管理用户安装应用程序并仅授予应用程序所需要的那些代码访问安全权限</p>
+  </li>
+</ul>
+
+<p>简单理解，ClickOnce部署的优点：</p>
+
+<ul>
+  <li>简化安装和更新应用程序的过程</li>
+  <li>可以自动更新</li>
+  <li>支持从Web更新</li>
+  <li>更安全，仅授予应用程序所必需的权限，通常为Intranet区域</li>
+</ul>
+
+<p>详细介绍可参考如下链接：</p>
+
+<p>https://msdn.microsoft.com/zh-cn/cn/library/142dbbz4(v=vs.90).aspx</p>
+
+<p>ClickOnce安装成功后，会在开始菜单下保存该安装程序</p>
+
+<p>接下来介绍如何开发ClickOnce程序并在网站上发布</p>
+
+<h2 id="0x02-使用clickonce的常规方法">0x02 使用ClickOnce的常规方法</h2>
+<hr>
+
+<h3 id="1配置web服务器">1、配置Web服务器</h3>
+
+<p>测试系统：Windows Server 2008 R2</p>
+
+<p><strong>1.安装Web服务器（IIS）</strong></p>
+
+<p>在”服务器管理器”-“角色”-“添加角色”-选择”Web服务器（IIS）”进行安装</p>
+
+<p>在”开始”-“管理工具”-“Internet信息服务（IIS）管理器”打开IIS，点击”浏览网站”，看是否正常显示</p>
+
+<p>用http访问Windows Server 2008 Web服务器的IP地址，看是否正常显示</p>
+
+<p>若以上测试通过，则说明IIS已安装成功且能正常使用</p>
+
+<p><strong>2.添加虚拟目录</strong></p>
+
+<p>设置别名：<code class="language-plaintext highlighter-rouge">publich</code></p>
+
+<p>设置物理路径：<code class="language-plaintext highlighter-rouge">c:\publish</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/2-1.png" alt="Alt text"></p>
+
+<p>访问该虚拟目录:</p>
+
+<p><code class="language-plaintext highlighter-rouge">http://192.168.81.140/publish/</code></p>
+
+<p>报错：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HTTP 错误 403.14 - Forbidden
+Web 服务器被配置为不列出此目录的内容。
+</code></pre></div></div>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/2-2.png" alt="Alt text"></p>
+
+<p><strong>3.启用目录浏览</strong></p>
+
+<p>打开IIS管理器，切换到功能试图，找到目录浏览，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/2-3.png" alt="Alt text"></p>
+
+<p>在目录浏览的操作界面下选择启用，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/2-4.png" alt="Alt text"></p>
+
+<p>此时，文件能够正常访问，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/2-5.png" alt="Alt text"></p>
+
+<h3 id="2开发clickonce程序">2、开发ClickOnce程序</h3>
+
+<p><strong>1.新建标准c#工程</strong></p>
+
+<p>添加测试代码：</p>
+
+<p><code class="language-plaintext highlighter-rouge">System.Diagnostics.Process.Start("calc.exe");</code></p>
+
+<p><strong>2.找到项目-属性-发布</strong></p>
+
+<p>如下图，设置发布文件夹位置，选择立即发布</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/3-1.png" alt="Alt text"></p>
+
+<p>C:\1下生成三个文件，分别为：</p>
+<ul>
+  <li>setup.exe</li>
+  <li>ConsoleApplication3.application</li>
+  <li>Application Files</li>
+</ul>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/3-2.png" alt="Alt text"></p>
+
+<p>安装成功后，在开始菜单自动生成快捷方式，文件夹名称为ClickOnce程序中发布者的名称</p>
+
+<p>安装文件保存在<code class="language-plaintext highlighter-rouge">%USERPROFILE%\Local Settings\Apps\2.0</code>下</p>
+
+<p>程序安装列表中也会存在，可在此处卸载ClickOnce</p>
+
+<p><strong>3.在IIS服务器上发布</strong></p>
+
+<p>将步骤2新生成的三个文件复制到<code class="language-plaintext highlighter-rouge">c:\pubish</code>下</p>
+
+<p><strong>4.测试</strong></p>
+
+<p>在另一台测试主机访问该Web目录，点击提示安全警告，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/3-3.png" alt="Alt text"></p>
+
+<p>选择运行，接着提示安全警告，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/3-4.png" alt="Alt text"></p>
+
+<p>选择运行，执行setup.exe，弹出计算器，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/3-5.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>在发布项下有多个选择可供选择，用来指定安装模式、应用程序文件、系统必备组件、更新选项等</p>
+
+<h2 id="0x03-基于clickonce的攻击技巧">0x03 基于ClickOnce的攻击技巧</h2>
+<hr>
+
+<p>基于ClickOnce的特性，最常见的利用方式为钓鱼攻击，所以接下来整理一下在钓鱼攻击中ClickOnce都有哪些利用方法</p>
+
+<h3 id="1增加权限">1、增加权限</h3>
+
+<p>在用户看来，更新程序的过程常常需要管理员的权限，所以在运行更新程序的过程中，如果程序弹框提示需要管理员权限，用户往往会选择同意，触发的payload随即获得了管理员权限</p>
+
+<h3 id="2利用自动更新功能替换payload">2、利用自动更新功能替换payload</h3>
+
+<p>ClickOnce支持自动更新功能，在运行时可检查新版本并自动更新</p>
+
+<p><strong>注:</strong></p>
+
+<p>ClickOnce安装成功后，会在开始菜单下保存该安装程序</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-1.png" alt="Alt text"></p>
+
+<h3 id="开启自动更新的步骤">开启自动更新的步骤：</h3>
+
+<p><strong>1.指定更新网址</strong></p>
+
+<p>设置”安装文件夹URL”，填入IIS服务器的下载地址就好，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>IIS服务器上不需要安装Visual Studio</p>
+
+<p><strong>2.设定自动更新</strong></p>
+
+<p>选择更新选项，启用”应用程序应该检查更新”，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-3.png" alt="Alt text"></p>
+
+<p><strong>3.指定版本号</strong></p>
+
+<p>如下图，选定”随每次发布自动递增修订号”</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-4.png" alt="Alt text"></p>
+
+<p><strong>4.测试</strong></p>
+
+<p>在IIS发布初始版本</p>
+
+<p>测试主机下载安装</p>
+
+<p>启用”应用程序应该检查更新”后，安装后的ClickOnce在每次运行时会访问服务器检查是否有更新，如果服务器有更新，会弹出更新对话框</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-5.png" alt="Alt text"></p>
+
+<p>点击确定后，安装程序更新为新版本，成功实现替换payload</p>
+
+<h3 id="3将url参数作为payload执行">3、将url参数作为payload执行</h3>
+
+<p>测试之前，Visual Studio需要作如下设置：</p>
+
+<p><strong>1.需要支持ClickOnce</strong></p>
+
+<p>安装Visual Studio的过程需要选择该项</p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-6.png" alt="Alt text"></p>
+
+<p>否则在”using System.Deployment.Application;”时会报错，提示如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">命名空间“System.Deployment”中不存在类型或命名空间名“Application”(是否缺少程序集引用?)	</code></p>
+
+<p><strong>2.添加引用</strong></p>
+
+<p>在项目工程中添加引用”System.Deployment”，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-7.png" alt="Alt text"></p>
+
+<p>在项目工程中添加引用”System.Web”</p>
+
+<p>否则报错，提示如下：</p>
+
+<p><code class="language-plaintext highlighter-rouge">当前上下文中不存在名称“HttpUtility”</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-8.png" alt="Alt text"></p>
+
+<p><strong>3.设置”允许向应用程序传递URL参数”</strong></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-9.png" alt="Alt text"></p>
+
+<p>否则，无法向ClickOnce传入参数</p>
+
+<p>测试代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Deployment.Application;
+using System.Web;
+using System.Collections.Specialized;
+namespace ConsoleApplication3
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            try
+               {
+                   NameValueCollection nvc = GetQueryStringParameters();
+
+                   foreach (string key in nvc)
+                   {
+                       Console.WriteLine(nvc[key]);
+                       Console.ReadLine();
+                   }
+               }
+               catch
+               {
+                   Console.WriteLine("No Params");
+                   Console.ReadLine();
+               }
+           }
+           public static NameValueCollection GetQueryStringParameters()
+           {
+               NameValueCollection col = new NameValueCollection();
+               if (ApplicationDeployment.IsNetworkDeployed)
+               {
+                   string queryString = ApplicationDeployment.CurrentDeployment.ActivationUri.Query;
+                   col = HttpUtility.ParseQueryString(queryString);
+               }
+               return col;
+           }      
+    }
+}
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>测试代码选自https://gist.github.com/subTee/bd446efeacf656c67f5c17ca0787f15b</p>
+
+<p>将新的ClickOnce程序发布</p>
+
+<p><strong>注：</strong></p>
+
+<p>只需要将.application和Application Files上传至网站就好，不需要提供setup.exe</p>
+
+<p>测试主机在IE浏览器访问如下URL：</p>
+
+<p><code class="language-plaintext highlighter-rouge">http://192.168.81.140/publish/ConsoleApplication3.application?N=TEST</code></p>
+
+<p>程序自动识别参数并解析输出，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/4-92.png" alt="Alt text"></p>
+
+<h3 id="4结合网站的重定向功能触发不同的payload">4、结合网站的重定向功能，触发不同的payload</h3>
+
+<p>网站的重定向可导致URL的参数不同，这样就可以实现触发不同的payload</p>
+
+<p>细节略</p>
+
+<p>可参考https://blog.netspi.com/all-you-need-is-one-a-clickonce-love-story/</p>
+
+<h2 id="0x04-钓鱼攻击的缺陷">0x04 钓鱼攻击的缺陷:</h2>
+<hr>
+
+<p>不同系统.net版本不同，所以钓鱼利用场景受限</p>
+
+<p>系统在执行ClickOnce程序的过程会检查数字签名验证发布者，否则会提示安装包不可信</p>
+
+<h2 id="0x05-防御">0x05 防御</h2>
+<hr>
+
+<h3 id="1对clickonce程序提高警惕识别真伪">1、对ClickOnce程序提高警惕，识别真伪</h3>
+
+<p>运行特殊后缀名的程序(如.application)就会对ClickOnce程序进行安装，不需要setup.exe，用户需要对此提高警惕</p>
+
+<h3 id="2禁用特殊后缀名如application">2、禁用特殊后缀名,如.application</h3>
+
+<p>不同.net版本生成的ClickOnce程序后缀名存在差异，如下链接有更详细的关于ClickOnce程序后缀名的介绍：
+https://robindotnet.wordpress.com/2010/06/12/mime-types-for-clickonce-deployment/</p>
+
+<h2 id="0x06-检测">0x06 检测</h2>
+<hr>
+
+<h3 id="1安装clickonce程序后会在注册表留下痕迹">1、安装ClickOnce程序后，会在注册表留下痕迹</h3>
+
+<p>注册表位置：</p>
+
+<p><code class="language-plaintext highlighter-rouge">HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall</code></p>
+
+<p>如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/5-1.png" alt="Alt text"></p>
+
+<h3 id="2安装clickonce程序后会在如下目录保存文件">2、安装ClickOnce程序后，会在如下目录保存文件：</h3>
+
+<p><code class="language-plaintext highlighter-rouge">%USERPROFILE%\Local Settings\Apps\2.0</code></p>
+
+<p>测试主机上的路径为：</p>
+
+<p><code class="language-plaintext highlighter-rouge">C:\Users\a\Local Settings\Apps\2.0</code></p>
+
+<p>每个ClickOnce程序都有一个特殊名字的文件夹，如图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2016-12-22/5-2.png" alt="Alt text"></p>
+
+<p><strong>注：</strong></p>
+
+<p>删除文件夹将从系统中删除ClickOnce应用程序</p>
+
+<h3 id="3安装程序列表也会存在clickonce程序名称">3、安装程序列表也会存在ClickOnce程序名称</h3>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>通过ClickOnce进行钓鱼，相比于常规的钓鱼方式，由于后缀名不常见，因此欺骗性更高，支持的扩展功能如解析URL参数、自动更新等功能，使得其利用方法更加灵活</p>
+
+<p>但是，只要用户提高警惕，验证ClickOnce程序的数字证书，只运行受信任的程序，就可以防范此类钓鱼方式的攻击</p>
+
+<p>未知攻焉知防，希望本文帮助大家更好的认识这个技术，保护自己的安全</p>
+
+<hr>
+
+<p>参考学习资料：</p>
+
+<p>http://subt0x10.blogspot.com/2016/12/mimikatz-delivery-via-clickonce-with.html</p>
+
+<p>https://blog.netspi.com/all-you-need-is-one-a-clickonce-love-story/</p>
+
+<p>http://www.sixdub.net/?p=555</p>
+
+<p>https://msdn.microsoft.com/en-us/library/t71a733d.aspx</p>
+
+<p>https://www.rsa.com/content/dam/pdfs/a-decade-of-phishing-wp-11-2016.pdf</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on December 22, 2016
+  </div>
+
+  
+</article>

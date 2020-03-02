@@ -1,0 +1,374 @@
+<article class="post">
+  <h1>SharpGen利用分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>SharpGen是我认为特别棒的一个工具，它能够用来对其他.Net程序集进行整合、重组并加密，二次编译后可生成一个全新的工具</p>
+
+<p>本文将要研究SharpGen的细节，介绍调用其他开源库的详细方法，分析利用思路</p>
+
+<p>参考链接：</p>
+
+<p>https://github.com/cobbr/SharpGen</p>
+
+<p>https://cobbr.io/SharpGen.html</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>.NET Core开发环境搭建</li>
+  <li>功能介绍</li>
+  <li>调用其他开源库的方法</li>
+  <li>利用思路</li>
+</ul>
+
+<h2 id="0x02-net-core开发环境搭建">0x02 .NET Core开发环境搭建</h2>
+<hr>
+
+<p>SharpGen使用.NET Core，优点是支持多平台(Linux，MacOS和Windows)</p>
+
+<p>编程语言使用C#，利用<a href="https://github.com/dotnet/roslyn">Rosyln</a>编译.NET Framework控制台应用程序或库</p>
+
+<p><strong>注：</strong></p>
+
+<p>Rosyln是一个.NET编译器平台，通过Scripting API，能够对脚本文件进行动态编译</p>
+
+<p>测试系统：Win7x64</p>
+
+<p>我在测试系统选择安装.NET Core 2.2.0、ASP.NET Core 2.2.0和SDK 2.2.101，这是为了兼容另一个工具<a href="https://github.com/cobbr/Covenant">Covenant</a></p>
+
+<p>对应版本的下载链接如下：</p>
+
+<p>https://dotnet.microsoft.com/download/thank-you/dotnet-sdk-2.2.101-windows-x64-installer</p>
+
+<p>https://dotnet.microsoft.com/download/thank-you/dotnet-runtime-2.2.0-windows-x64-installer</p>
+
+<p>https://dotnet.microsoft.com/download/thank-you/dotnet-runtime-2.2.0-windows-x64-asp.net-core-runtime-installer</p>
+
+<p>安装Git for Windows，下载链接如下：</p>
+
+<p>https://github.com/git-for-windows/git/releases/download/v2.23.0.windows.1/Git-2.23.0-64-bit.exe</p>
+
+<p>下载安装并编译SharpGen：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone https://github.com/cobbr/SharpGen
+cd SharpGen
+dotnet build --configuration Release
+</code></pre></div></div>
+
+<h2 id="0x03-基本功能介绍">0x03 基本功能介绍</h2>
+<hr>
+
+<p>SharpGen默认集成了<a href="https://github.com/cobbr/SharpSploit">SharpSploit</a>，能够直接调用其中的功能</p>
+
+<p>参数说明：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Options:
+  -? | -h | --help                                     Show help information
+  -f | --file &lt;OUTPUT_FILE&gt;                            The output file to write to.
+  -d | --dotnet | --dotnet-framework &lt;DOTNET_VERSION&gt;  The Dotnet Framework version to target (net35 or net40).
+  -o | --output-kind &lt;OUTPUT_KIND&gt;                     The OutputKind to use (console or dll).
+  -p | --platform &lt;PLATFORM&gt;                           The Platform to use (AnyCpy, x86, or x64).
+  -n | --no-optimization                               Don't use source code optimization.
+  -a | --assembly-name &lt;ASSEMBLY_NAME&gt;                 The name of the assembly to be generated.
+  -s | --source-file &lt;SOURCE_FILE&gt;                     The source code to compile.
+  -c | --class-name &lt;CLASS_NAME&gt;                       The name of the class to be generated.
+  --confuse &lt;CONFUSEREX_PROJECT_FILE&gt;                  The ConfuserEx ProjectFile configuration.
+</code></pre></div></div>
+
+<h3 id="1对单行代码进行编译">1.对单行代码进行编译</h3>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet bin/Release/netcoreapp2.1/SharpGen.dll -f example.exe "Console.WriteLine(Mimikatz.LogonPasswords());"
+</code></pre></div></div>
+
+<p>执行过程显示自动补齐的编译代码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-10-17/2-1.png" alt="Alt text"></p>
+
+<p>值得注意的是其中的随机类名<code class="language-plaintext highlighter-rouge">ohq8r7eQ1qK</code>，每次生成文件时使用的类名均会改变</p>
+
+<p><strong>注：</strong></p>
+
+<p>如果想指定类名，可以加入<strong>-c</strong>参数，示例如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet bin/Release/netcoreapp2.1/SharpGen.dll -c abcde12345 -f example.exe "Console.WriteLine(Mimikatz.LogonPasswords());" 
+</code></pre></div></div>
+
+<p>命令执行后生成example.exe，example.exe会调用Mimikatz的<code class="language-plaintext highlighter-rouge">sekurlsa::logonpasswords</code>命令</p>
+
+<h3 id="2对完整代码文件进行编译">2.对完整代码文件进行编译</h3>
+
+<p>example.txt的内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using SharpSploit.Execution;
+using SharpSploit.Credentials;
+
+class Program
+{
+    static void Main()
+    {
+        Console.WriteLine(Mimikatz.LogonPasswords());
+        return;
+    }
+}
+</code></pre></div></div>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet bin/Release/netcoreapp2.1/SharpGen.dll -f example.exe --source-file example.txt
+</code></pre></div></div>
+
+<p>执行过程显示编译代码，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-10-17/2-2.png" alt="Alt text"></p>
+
+<p>由于指定了类名为<code class="language-plaintext highlighter-rouge">Program</code>，所以不再具有随机类名的功能</p>
+
+<p><strong>注：</strong></p>
+
+<p>SharpGen使用了Rosyln进行动态编译，每次生成的文件hash都会不一样</p>
+
+<h2 id="0x04-高级功能">0x04 高级功能</h2>
+<hr>
+
+<h3 id="1缩小生成文件的体积">1.缩小生成文件的体积</h3>
+
+<h4 id="1取消对指定dll的引用">(1)取消对指定dll的引用</h4>
+
+<p>编辑文件<code class="language-plaintext highlighter-rouge">SharpGen/References/references.yml</code></p>
+
+<p>此处的dll通常为C#程序使用的引用文件</p>
+
+<p>不需要的dll名称属性由<code class="language-plaintext highlighter-rouge">Enabled: true</code>改为<code class="language-plaintext highlighter-rouge">Enabled: false</code></p>
+
+<h4 id="2取消对指定dll的引用">(2)取消对指定dll的引用</h4>
+
+<p>编辑文件<code class="language-plaintext highlighter-rouge">SharpGen/Resources/resources.yml</code></p>
+
+<p>此处的dll为实现mimikatz的功能</p>
+
+<p>不需要的dll名称属性由<code class="language-plaintext highlighter-rouge">Enabled: true</code>改为<code class="language-plaintext highlighter-rouge">Enabled: false</code></p>
+
+<p><strong>注：</strong></p>
+
+<ul>
+  <li>powerkatz_x64.dll为64位的mimikatz</li>
+  <li>powerkatz_x64.dll.comp为使用System.IO.Compression库压缩后的64位的mimikatz</li>
+  <li>powerkatz_x86.dll为32位的mimikatz</li>
+  <li>powerkatz_x86.dll.comp为使用System.IO.Compression库压缩后的32位的mimikatz</li>
+</ul>
+
+<h4 id="3使用confuserex资源保护">(3)使用ConfuserEx资源保护</h4>
+
+<p>ConfuserEx资源保护会对资源进行加密和LZMA压缩</p>
+
+<p>示例命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet bin/Release/netcoreapp2.1/SharpGen.dll -f example.exe --confuse confuse.cr "Console.WriteLine(Mimikatz.LogonPasswords());"
+</code></pre></div></div>
+
+<h3 id="2调用其他开源库">2.调用其他开源库</h3>
+
+<p>参考资料中未介绍这部分内容，这里给出我的解决方法</p>
+
+<p>这里给出两个示例，一个是开源的<a href="https://github.com/GhostPack/SharpWMI">SharpWMI</a>，另一个是我自己编写的模板SharpTest</p>
+
+<h4 id="1添加对sharpwmi的调用">1.添加对SharpWMI的调用</h4>
+
+<p>(1)将SharpWMI源码复制到<code class="language-plaintext highlighter-rouge">SharpGen/Source</code></p>
+
+<p>(2)修改<code class="language-plaintext highlighter-rouge">SharpGen/SharpGen.csproj</code></p>
+
+<p>ItemGroup标签中添加<code class="language-plaintext highlighter-rouge">&lt;Compile Remove="Source\SharpWMI\Program.cs" /&gt;</code></p>
+
+<p>否则在编译SharpGen时会报错提示：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Source\SharpWMI\Program.cs(3,14): error CS0234: The type or namespace name 'Management' does not exist in the namespace 'System' (are you missing an assembly reference?)
+</code></pre></div></div>
+
+<p>(3)修改SharpWMI的源代码</p>
+
+<p>只保留Program.cs，删除其中的Main函数并且将Program.cs中的每个静态方法改为公共方法</p>
+
+<p>例如：</p>
+
+<p><code class="language-plaintext highlighter-rouge">static void LocalWMIQuery(string wmiQuery, string wmiNameSpace = "")</code>需要修改为<code class="language-plaintext highlighter-rouge">public static void LocalWMIQuery(string wmiQuery, string wmiNameSpace = "")</code></p>
+
+<p>(4)重新编译SharpGen</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet build --configuration Release
+</code></pre></div></div>
+
+<p>(5)调用测试</p>
+
+<p>example.txt的功能为调用SharpWMI中的<code class="language-plaintext highlighter-rouge">LocalWMIQuery</code>方法查询<code class="language-plaintext highlighter-rouge">win32_ComputerSystem</code>，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SharpWMI.Program.LocalWMIQuery("select * from win32_ComputerSystem");
+Console.WriteLine(Host.GetProcessList());
+</code></pre></div></div>
+
+<p>SharpGen的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet bin/Release/netcoreapp2.1/SharpGen.dll -f example.exe --source-file example.txt
+</code></pre></div></div>
+
+<p>生成example.ex并执行，调用成功，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-10-17/2-3.png" alt="Alt text"></p>
+
+<h4 id="2添加自己编写的c模板">2.添加自己编写的C#模板</h4>
+
+<p>命名为SharpTest，功能为接收参数并在命令行输出</p>
+
+<p>(1)新建文件夹SharpTest，其中新建文件Program.cs，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Collections.Generic;
+using System.Management;
+namespace SharpTest
+{
+    class Program
+    {
+        public static void TestMethod(string string1)
+        {
+            Console.WriteLine(string1);
+        }
+    }
+}
+</code></pre></div></div>
+
+<p>(2)修改SharpGen/SharpGen.csproj</p>
+
+<p>ItemGroup标签中添加<code class="language-plaintext highlighter-rouge">&lt;Compile Remove="Source\SharpTest\Program.cs" /&gt;</code></p>
+
+<p>(3)重新编译SharpGen</p>
+
+<p>命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet build --configuration Release
+</code></pre></div></div>
+
+<p>(4)调用测试</p>
+
+<p>example.txt的功能为调用SharpTest中的TestMethod方法，参数为<code class="language-plaintext highlighter-rouge">123456</code>，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SharpTest.Program.TestMethod("123456");
+</code></pre></div></div>
+
+<p>SharpGen的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet bin/Release/netcoreapp2.1/SharpGen.dll -f example.exe --source-file example.txt
+</code></pre></div></div>
+
+<p>生成example.exe并执行，调用成功，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-10-17/2-4.png" alt="Alt text"></p>
+
+<p>为了便于测试，我已经fork了cobbr的SharpGen，添加了对SharpWMI和SharpTest的调用，地址如下：</p>
+
+<p>https://github.com/3gstudent/SharpGen</p>
+
+<h3 id="3资源保护">3.资源保护</h3>
+
+<p>使用新版的ConfuserEx能够对编译后的文件资源进行保护，地址如下：</p>
+
+<p>https://github.com/mkaring/ConfuserEx</p>
+
+<p>旧版的ConfuserEx不再进行维护，地址如下：</p>
+
+<p>https://github.com/yck1509/ConfuserEx</p>
+
+<p>调用命令示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dotnet bin/Release/netcoreapp2.1/SharpGen.dll -f example.exe --confuse confuse.cr "Console.WriteLine(Mimikatz.LogonPasswords());"
+</code></pre></div></div>
+
+<p>对应使用的配置文件为<code class="language-plaintext highlighter-rouge">SharpGen/confuse.cr</code></p>
+
+<p>默认配置为对资源执行加密和LZMA压缩</p>
+
+<p>ConfuserEx还支持其他保护功能：</p>
+
+<ul>
+  <li>Anti Debug Protection</li>
+  <li>Anti Dump Protection</li>
+  <li>Anti IL Dasm Protection</li>
+  <li>Anti Tamper Protection</li>
+  <li>Constants Protection</li>
+  <li>Control Flow Protection</li>
+  <li>Invalid Metadata Protection</li>
+  <li>Name Protection</li>
+  <li>Reference Proxy Protection</li>
+  <li>Resources Protection</li>
+</ul>
+
+<p>只需要去掉<code class="language-plaintext highlighter-rouge">SharpGen/confuse.cr</code>中对应的注释即可</p>
+
+<p>例如添加<code class="language-plaintext highlighter-rouge">anti debug</code>功能，配置文件confuse.cr的内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;project baseDir="{0}" outputDir="{1}" xmlns="http://confuser.codeplex.com"&gt;
+    &lt;module path="{2}"&gt;
+      &lt;rule pattern="true" inherit="false"&gt;
+         &lt;!-- &lt;protection id="anti debug" /&gt;       --&gt;
+         &lt;!-- &lt;protection id="anti dump" /&gt;        --&gt;
+         &lt;!-- &lt;protection id="anti ildasm" /&gt;      --&gt;
+         &lt;!-- &lt;protection id="anti tamper" /&gt;      --&gt;
+         &lt;!-- &lt;protection id="constants" /&gt;        --&gt;
+         &lt;!-- &lt;protection id="ctrl flow" /&gt;        --&gt;
+         &lt;!-- &lt;protection id="invalid metadata" /&gt; --&gt;
+         &lt;!-- &lt;protection id="ref proxy" /&gt;        --&gt;
+         &lt;!-- &lt;protection id="rename" /&gt;           --&gt;
+         &lt;protection id="resources" /&gt;
+         &lt;protection id="anti debug" /&gt;
+      &lt;/rule&gt;
+    &lt;/module&gt;
+&lt;/project&gt;
+</code></pre></div></div>
+
+<h3 id="4补充禁用优化">4.补充：禁用优化</h3>
+
+<p>SharpGen在编译期间会对源代码进行优化，可通过<code class="language-plaintext highlighter-rouge">--no-optimization</code>参数来禁用优化，这将导致增加生成文件的大小</p>
+
+<h2 id="0x05-利用分析">0x05 利用分析</h2>
+<hr>
+
+<p>SharpGen可以作为.Net程序集重新包装的平台，具有如下优点：</p>
+
+<ul>
+  <li>使用.NET Core平台和Roslyn进行动态编译，开发代码时可选择多平台(Linux，MacOS和Windows)</li>
+  <li>可调用其他开源库，实现功能的定制，最后将其封装成单独的一个exe文件或dll文件</li>
+  <li>使用ConfuserEx对资源进行加密和压缩，避免对特征码的检测</li>
+  <li>生成的文件支持.Net3.5和.Net 4.0</li>
+  <li>生成的文件支持x86和x64</li>
+</ul>
+
+<p>更进一步，使用SharpGen能够快速的将.Net程序集形式的POC转换成EXP</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了SharpGen的功能，分享了我实现调用其他开源库的方法，分析SharpGen的优点。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on October 17, 2019
+  </div>
+
+  
+</article>

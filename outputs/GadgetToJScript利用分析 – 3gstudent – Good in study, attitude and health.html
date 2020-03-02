@@ -1,0 +1,199 @@
+<article class="post">
+  <h1>GadgetToJScript利用分析</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p><a href="https://github.com/med0x2e/GadgetToJScript">GadgetToJScrip</a>能够将.Net程序封装在js或vbs脚本中，相比于James Forshaw开源的<a href="https://github.com/tyranid/DotNetToJScript">DotNetToJScript</a>，修改了反序列化调用链，能够绕过AMSI，添加了绕过.Net 4.8+阻止Assembly.Load的功能</p>
+
+<p>本文用来记录研究细节，分析利用思路，简要修改原工程，更便于测试Payload，分享同<a href="https://github.com/byt3bl33d3r/SILENTTRINITY">SILENTTRINITY</a>结合的方法</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>GadgetToJScript的代码分析和实现逻辑</li>
+  <li>为了便于测试Payload的修改方法</li>
+  <li>利用分析</li>
+  <li>同SILENTTRINITY结合的方法</li>
+</ul>
+
+<h2 id="0x02-gadgettojscript的代码分析和实现逻辑">0x02 GadgetToJScript的代码分析和实现逻辑</h2>
+<hr>
+
+<h3 id="1代码分析">1.代码分析</h3>
+
+<h4 id="1templates文件夹">(1)templates文件夹</h4>
+
+<p>保存有js、vbs和hta的模板</p>
+
+<p>模板文件同<a href="https://github.com/tyranid/DotNetToJScript/tree/69d1ddb146d23112127ac25decd27325dbfbef64/DotNetToJScript/Resources">DotNetToJScript</a>基本相同，区别如下：</p>
+
+<ol>
+  <li>添加了一些对.Net版本的判断，读取注册表<code class="language-plaintext highlighter-rouge">HKLM\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\</code>，如果成功，版本为4.0.30319，否则为2.0.50727</li>
+  <li>做了两次反序列化，第一次是禁用ActivitySurrogateSelector类型检查，用来绕过.Net 4.8+阻止Assembly.Load的功能，第二次用来加载.Net程序</li>
+</ol>
+
+<h4 id="2programcs">(2)Program.cs</h4>
+
+<p>主程序，替换模板中的变量，计算长度，生成最终的js、vbs和hta脚本</p>
+
+<h4 id="3testassemblyloadercs">(3)TestAssemblyLoader.cs</h4>
+
+<p>Payload以字符串的形式保存，使用CompileAssemblyFromSource对其进行动态编译，编译结果保存在内存(results.CompiledAssembly)中</p>
+
+<p>关键函数：<code class="language-plaintext highlighter-rouge">CompileAssemblyFromSource</code></p>
+
+<p>其中，GenerateInMemory属性默认为true，表示把编译生成的程序集保留在内存中，通过CompilerResults实例的CompiledAssembly可以获取，如果设置为false，可以将编译生成的程序集保存在本地硬盘</p>
+
+<p>参考资料：</p>
+
+<p>https://docs.microsoft.com/en-us/dotnet/api/system.codedom.compiler.codedomprovider.compileassemblyfromsource?view=netframework-4.8</p>
+
+<h4 id="4_asurrogategadgetgeneratorcs">(4)_ASurrogateGadgetGenerator.cs</h4>
+
+<p>构建一个链来映射字节数组以创建类的实例:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>byte[] -&gt; Assembly.Load -&gt; Assembly -&gt; Assembly.GetType -&gt; Type[] -&gt; Activator.CreateInstance -&gt; Win!
+</code></pre></div></div>
+
+<p>该段代码应该来自于：https://github.com/pwntester/ysoserial.net/blob/master/ysoserial/Generators/ActivitySurrogateSelectorGenerator.cs#L50</p>
+
+<p>可以理解为TestAssemblyLoader.cs实现将编译结果保存在内存(results.CompiledAssembly)中，_ASurrogateGadgetGenerator.cs用来读取这段内存并实现对.Net程序的调用</p>
+
+<h4 id="5_disabletypecheckgadgetgeneratorcs">(5)_DisableTypeCheckGadgetGenerator.cs</h4>
+
+<p>用来绕过.Net 4.8+阻止Assembly.Load的功能</p>
+
+<p>详细细节可参考：</p>
+
+<p>https://silentbreaksecurity.com/re-animating-activitysurrogateselector/</p>
+
+<h4 id="6_surrogateselectorcs">(6)_SurrogateSelector.cs</h4>
+
+<p>创建Surrogate类，该类充当包装器</p>
+
+<p>该段代码应该来自于：https://github.com/pwntester/ysoserial.net/blob/bb695b8162bdc1d191c32f6a234a8fff5665ab9b/ysoserial/Generators/ActivitySurrogateSelectorGenerator.cs#L15</p>
+
+<h3 id="2实现逻辑">2.实现逻辑</h3>
+
+<ol>
+  <li>执行TestAssemblyLoader.cs，将字符串形式的Payload进行动态编译，编译结果保存在内存(results.CompiledAssembly)中</li>
+  <li>执行_ASurrogateGadgetGenerator.cs，读取1中的内存并实现.Net程序的调用</li>
+  <li>执行_DisableTypeCheckGadgetGenerator.cs，实现绕过.Net 4.8+阻止Assembly.Load的功能</li>
+  <li>执行Program.cs，替换模板文件的两个变量，计算长度，生成最终的js、vbs和hta脚本</li>
+</ol>
+
+<h2 id="0x03-为了便于测试payload的修改方法">0x03 为了便于测试Payload的修改方法</h2>
+<hr>
+
+<p>查看文件TestAssemblyLoader.cs，Payload以字符串的形式进行保存，部分内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>           string _testClass = @"
+                    
+                using System;
+                using System.Runtime.InteropServices;
+                    public class TestClass
+                    {
+                        " + "[DllImport(\"User32.dll\", CharSet = CharSet.Unicode)]" +
+                        @"public static extern int MessageBox(IntPtr h, string m, string c, int t);
+                        public TestClass(){
+                            " + "MessageBox((IntPtr)0, \"Test .NET Assembly Constructor Called.\", \"Coolio\", 0);" +
+                        @"}
+                    }           
+            ";
+</code></pre></div></div>
+
+<p>我们可以看到，Payload以字符串的形式进行保存时，需要考虑转义字符，这会影响Payload的开发效率，也不是很直观</p>
+
+<p>这里给出我的一个解决方法：将<code class="language-plaintext highlighter-rouge">CompileAssemblyFromSource</code>换成<code class="language-plaintext highlighter-rouge">CompileAssemblyFromFile</code></p>
+
+<p>这样可以从文件中读取Payload，也就不再需要考虑转义字符</p>
+
+<p>我修改过的版本已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/GadgetToJScript</p>
+
+<p>我的版本修改了TestAssemblyLoader.cs，关键代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CompilerResults results = provider.CompileAssemblyFromFile(parameters, "payload.txt");
+</code></pre></div></div>
+
+<p>从固定文件payload.txt中读取Payload</p>
+
+<p>如果想要实现同原工程相同的功能，payload.txt的内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>using System;
+using System.Runtime.InteropServices;
+public class TestClass
+{
+	[DllImport("User32.dll", CharSet = CharSet.Unicode)]public static extern int MessageBox(IntPtr h, string m, string c, int t);
+	public TestClass()
+	{
+		MessageBox((IntPtr)0, "Test .NET Assembly Constructor Called.", "Coolio", 0);
+        }
+}
+</code></pre></div></div>
+
+<p>Payload看起来更加直观，也更易于开发</p>
+
+<h2 id="0x04-利用分析">0x04 利用分析</h2>
+<hr>
+
+<p>GadgetToJScript应该算是对James Forshaw开源的DotNetToJScript的进一步利用，添加的反序列化调用链不需要调用<code class="language-plaintext highlighter-rouge">d.DynamicInvoke(al.ToArray()).CreateInstance(entry_class)</code>，能够绕过一些杀毒软件对特定代码的检测，可尝试以此为模板做进一步的开发</p>
+
+<p>对于Payload的进一步利用，需要更换成csharp的格式，这让我想到了SILENTTRINITY</p>
+
+<h2 id="0x05-同silenttrinity结合的方法">0x05 同SILENTTRINITY结合的方法</h2>
+<hr>
+
+<p>对于SILENTTRINITY，我在之前的文章<a href="https://3gstudent.github.io/3gstudent.github.io/SILENTTRINITY%E5%88%A9%E7%94%A8%E5%88%86%E6%9E%90/">《SILENTTRINITY利用分析》</a>做过分析</p>
+
+<p><strong>注：</strong></p>
+
+<p>SILENTTRINITY正在持续更新中，添加了更多功能，我文章的内容有可能不再准确</p>
+
+<p>搭建好SILENTTRINITY后，选择生成csharp格式的stager，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>stagers
+list
+use csharp
+generate http
+</code></pre></div></div>
+
+<p>提取stager.cs中的代码，填入payload.txt，最终示例代码已上传至github，地址如下：https://github.com/3gstudent/GadgetToJScript/blob/master/payload.txt</p>
+
+<p>编译我修改过的GadgetToJScript，将payload.txt保存在同级目录，生成js脚本的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>GadgetToJScript.exe -w js -o 1
+</code></pre></div></div>
+
+<p>生成1.js</p>
+
+<p>执行1.js后，SILENTTRINITY获得上线信息，进程名称为wscript，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-10-10/2-1.png" alt="Alt text"></p>
+
+<p>测试成功</p>
+
+<h2 id="0x06-小结">0x06 小结</h2>
+<hr>
+
+<p>本文介绍了GadgetToJScript的代码细节和实现流程，简要修改原工程，更便于测试Payload，分析利用思路，分享同<a href="https://github.com/byt3bl33d3r/SILENTTRINITY">SILENTTRINITY</a>结合的方法</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on October 10, 2019
+  </div>
+
+  
+</article>

